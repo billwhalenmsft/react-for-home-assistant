@@ -1,0 +1,6 @@
+{
+  "name": "React for Home Assistant",
+  "render_readme": true,
+  "filename": "react-for-home-assistant.js",
+  "homeassistant": "2024.1.0"
+}
