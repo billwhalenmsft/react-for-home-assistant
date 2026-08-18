@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { useEntities } from '../ha/useEntities';
 import type { Hass, HassEntity } from '../ha/types';
+import { Floorplan } from './floorplan';
+import { HousePulse, ForecastStrip } from './pulse';
 
 /**
  * WHALEN ESTATE — a Savant/Control4-class surface for Home Assistant.
@@ -545,13 +547,54 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
         </Glass>
       )}
 
+      <Glass span={narrow ? 1 : 2} style={{ padding: 14 }}>
+        <div style={{ padding: '4px 8px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <div style={LABEL}>The Estate — live</div>
+          <MoreLink onClick={() => go('rooms')} />
+        </div>
+        <Floorplan hass={hass} />
+      </Glass>
+
+      <div style={{ display: 'grid', gap: 18, alignContent: 'start' }}>
+        <ClimateDial hass={hass} />
+        <SecuritySummary hass={hass} onMore={() => go('security')} />
+      </div>
+
+      <Glass span={narrow ? 1 : 2}>
+        <PanelHead label="House Pulse — 24h" />
+        <HousePulse hass={hass} />
+      </Glass>
+
+      <WeatherPanel hass={hass} />
+
       <LightingSummary hass={hass} onMore={() => go('rooms')} />
-      <ClimateDial hass={hass} />
-      <SecuritySummary hass={hass} onMore={() => go('security')} />
       <NowPlaying hass={hass} onMore={() => go('cinema')} />
       <GrowSummary hass={hass} onMore={() => go('grow')} />
       <SkySummary hass={hass} onMore={() => go('sky')} />
     </div>
+  );
+}
+
+function WeatherPanel({ hass }: { hass: Hass }) {
+  const ids = useMemo(() => [E.weather, E.moonEmoji], []);
+  const e = useEntities(hass, ids);
+  const w = e[E.weather];
+  const temp = attr(w, 'temperature') as number | undefined;
+
+  return (
+    <Glass>
+      <PanelHead label="Savage, Minnesota" />
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+        <span style={{ fontSize: 52, fontWeight: 200, lineHeight: 1 }}>{temp != null ? Math.round(temp) : '—'}°</span>
+        <div>
+          <div style={{ fontSize: 14 }}>{titleize(w?.state)}</div>
+          <div style={{ fontSize: 11.5, color: T.dim }}>
+            {(attr(w, 'humidity') as number | undefined) ?? '—'}% humidity · wind {(attr(w, 'wind_speed') as number | undefined)?.toFixed?.(0) ?? '—'} mph
+          </div>
+        </div>
+      </div>
+      <ForecastStrip hass={hass} />
+    </Glass>
   );
 }
 
