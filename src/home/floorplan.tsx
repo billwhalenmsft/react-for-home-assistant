@@ -2,6 +2,8 @@ import { useMemo, useState, type CSSProperties } from 'react';
 import { useEntities } from '../ha/useEntities';
 import type { Hass } from '../ha/types';
 import { FLOORS, PLAN_W, PLAN_H, MATERIAL_COLORS, type PlanRoom } from './plan.generated';
+import { ROOM_DEVICES, FLOOR_TABS } from './rooms';
+import { RoomPanel } from './RoomPanel';
 
 /**
  * The living floorplan — Savant's signature move, drawn as real vector
@@ -30,7 +32,7 @@ const AMBER = 'rgb(250,187,90)';
 const rgb = (c: [number, number, number] | undefined, fallback: string) =>
   c ? `rgb(${c[0]},${c[1]},${c[2]})` : fallback;
 
-/** Which entity lights which room, per floor. */
+/** The one entity whose state colours each room. Fuller device lists live in rooms.ts. */
 const ROOM_ENTITY: Record<string, Record<string, string>> = {
   fp_main: {
     'Great Room': 'light.living_room_living_room_main_lights',
@@ -64,18 +66,22 @@ const LIT = new Set(['on', 'open', 'playing', 'run', 'cleaning']);
 export interface FloorplanProps {
   hass: Hass;
   floor?: string;
-  /** fires when a room is tapped; without it, tapping toggles the room */
+  /** override the default drill-in behaviour */
   onSelectRoom?: (room: PlanRoom, entity?: string) => void;
   height?: number | string;
 }
 
-export function Floorplan({ hass, floor = 'fp_main', onSelectRoom, height = '100%' }: FloorplanProps) {
-  const plan = FLOORS[floor] ?? FLOORS.fp_main;
-  const map = useMemo(() => ROOM_ENTITY[floor] ?? {}, [floor]);
-  const beacons = useMemo(() => BEACONS[floor] ?? [], [floor]);
+export function Floorplan({ hass, floor, onSelectRoom, height = '100%' }: FloorplanProps) {
+  const [tab, setTab] = useState(floor ?? 'fp_main');
+  const [selected, setSelected] = useState<string | null>(null);
   const [hover, setHover] = useState<string | null>(null);
 
-  // only the entities this floor actually draws — see ha/useEntities
+  const active = floor ?? tab;
+  const plan = FLOORS[active] ?? FLOORS.fp_main;
+  const map = useMemo(() => ROOM_ENTITY[active] ?? {}, [active]);
+  const beacons = useMemo(() => BEACONS[active] ?? [], [active]);
+
+  // only what this floor draws — see ha/useEntities for why this matters
   const ids = useMemo(
     () => [...Object.values(map), ...beacons.map((b) => b.entity)],
     [map, beacons]
@@ -90,158 +96,204 @@ export function Floorplan({ hass, floor = 'fp_main', onSelectRoom, height = '100
     return typeof b === 'number' ? Math.max(0.25, b / 255) : 1;
   };
 
+  const knownRoom = (name: string) => !!ROOM_DEVICES[active]?.[name] || !!map[name];
+
   const activate = (room: PlanRoom) => {
-    const entity = map[room.name];
-    if (onSelectRoom) return onSelectRoom(room, entity);
-    if (!entity) return;
-    const [domain] = entity.split('.');
-    if (domain === 'light' || domain === 'switch') {
-      void hass.callService(domain, 'toggle', {}, { entity_id: entity });
-    } else if (domain === 'cover') {
-      const open = states[entity]?.state === 'open';
-      void hass.callService('cover', open ? 'close_cover' : 'open_cover', {}, { entity_id: entity });
-    }
+    if (onSelectRoom) return onSelectRoom(room, map[room.name]);
+    if (!knownRoom(room.name)) return;
+    setSelected((cur) => (cur === room.name ? null : room.name));
   };
 
   const svgStyle: CSSProperties = { width: '100%', height, display: 'block' };
 
   return (
-    <svg viewBox={`0 0 ${PLAN_W} ${PLAN_H}`} style={svgStyle} role="img" aria-label={`${plan.title} floorplan`}>
-      <defs>
-        <filter id="fp-pool" x="-25%" y="-25%" width="150%" height="150%">
-          <feGaussianBlur stdDeviation="26" />
-        </filter>
-      </defs>
-
-      {/* thick strokes behind the fills — see header note */}
-      <g fill="none" stroke="#8f9cb0" strokeWidth={14} strokeLinejoin="round">
-        {plan.rooms.map((r, i) => (
-          <rect key={`w${i}`} x={r.x} y={r.y} width={r.w} height={r.h} rx={3} />
-        ))}
-      </g>
-
-      {/* floor materials, from the signed selections sheet */}
-      <g>
-        {plan.rooms.map((r, i) => (
-          <rect
-            key={`f${i}`}
-            x={r.x}
-            y={r.y}
-            width={r.w}
-            height={r.h}
-            rx={2}
-            fill={rgb(MATERIAL_COLORS[r.material ?? ''], r.cold ? '#0f1319' : '#1b2029')}
-            stroke="#39424f"
-            strokeWidth={2}
-          />
-        ))}
-      </g>
-
-      {/* light pooling */}
-      <g style={{ pointerEvents: 'none' }} filter="url(#fp-pool)">
-        {plan.rooms.map((r, i) => {
-          const b = brightnessOf(map[r.name]);
-          if (!b) return null;
-          return (
-            <rect
-              key={`g${i}`}
-              x={r.x + 8}
-              y={r.y + 8}
-              width={Math.max(0, r.w - 16)}
-              height={Math.max(0, r.h - 16)}
-              fill={AMBER}
-              opacity={0.3 + 0.45 * b}
-              style={{ transition: 'opacity 420ms ease' }}
-            />
-          );
-        })}
-      </g>
-
-      {/* labels + hit targets */}
-      <g>
-        {plan.rooms.map((r, i) => {
-          const entity = map[r.name];
-          const live = !!entity;
-          const isHover = hover === r.name;
-          const cx = r.x + r.w / 2;
-          const cy = r.y + r.h / 2;
-          const fs = Math.max(20, Math.min(34, r.w / 9));
-          const showSqft = !!r.sqft && r.h > 110;
-          return (
-            <g
-              key={`l${i}`}
-              onClick={() => activate(r)}
-              onMouseEnter={() => setHover(r.name)}
-              onMouseLeave={() => setHover(null)}
-              style={{ cursor: live ? 'pointer' : 'default' }}
+    <div style={{ position: 'relative' }}>
+      {!floor && (
+        <div style={tabsWrap}>
+          {FLOOR_TABS.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => { setTab(t.key); setSelected(null); }}
+              style={{ ...tabStyle, ...(active === t.key ? tabActive : null) }}
             >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <svg viewBox={`0 0 ${PLAN_W} ${PLAN_H}`} style={svgStyle} role="img" aria-label={`${plan.title} floorplan`}>
+        <defs>
+          <filter id="fp-pool" x="-25%" y="-25%" width="150%" height="150%">
+            <feGaussianBlur stdDeviation="26" />
+          </filter>
+        </defs>
+
+        {/* thick strokes behind the fills — see header note */}
+        <g fill="none" stroke="#8f9cb0" strokeWidth={14} strokeLinejoin="round">
+          {plan.rooms.map((r, i) => (
+            <rect key={`w${i}`} x={r.x} y={r.y} width={r.w} height={r.h} rx={3} />
+          ))}
+        </g>
+
+        {/* floor materials, from the signed selections sheet */}
+        <g>
+          {plan.rooms.map((r, i) => (
+            <rect
+              key={`f${i}`}
+              x={r.x}
+              y={r.y}
+              width={r.w}
+              height={r.h}
+              rx={2}
+              fill={rgb(MATERIAL_COLORS[r.material ?? ''], r.cold ? '#0f1319' : '#1b2029')}
+              stroke="#39424f"
+              strokeWidth={2}
+            />
+          ))}
+        </g>
+
+        {/* light pooling */}
+        <g style={{ pointerEvents: 'none' }} filter="url(#fp-pool)">
+          {plan.rooms.map((r, i) => {
+            const b = brightnessOf(map[r.name]);
+            if (!b) return null;
+            return (
               <rect
-                x={r.x}
-                y={r.y}
-                width={r.w}
-                height={r.h}
-                rx={2}
-                fill={isHover && live ? 'rgba(255,255,255,0.07)' : 'transparent'}
-                stroke={isHover && live ? 'rgba(250,187,90,0.9)' : 'none'}
-                strokeWidth={3}
-                style={{ transition: 'fill 160ms ease' }}
+                key={`g${i}`}
+                x={r.x + 8}
+                y={r.y + 8}
+                width={Math.max(0, r.w - 16)}
+                height={Math.max(0, r.h - 16)}
+                fill={AMBER}
+                opacity={0.3 + 0.45 * b}
+                style={{ transition: 'opacity 420ms ease' }}
               />
-              {r.name ? (
-                <text
-                  x={cx}
-                  y={showSqft ? cy - 4 : cy + 6}
-                  textAnchor="middle"
-                  fontSize={fs}
-                  fontWeight={600}
-                  fill={r.cold ? '#6e7a8c' : '#e6ecf5'}
-                  style={{ pointerEvents: 'none', userSelect: 'none' }}
-                >
-                  {r.name}
-                </text>
-              ) : null}
-              {showSqft ? (
-                <text
-                  x={cx}
-                  y={cy + fs - 2}
-                  textAnchor="middle"
-                  fontSize={fs * 0.62}
-                  fill="#7d8a9c"
-                  style={{ pointerEvents: 'none', userSelect: 'none' }}
-                >
-                  {r.sqft} sq ft
-                </text>
-              ) : null}
-            </g>
-          );
-        })}
-      </g>
+            );
+          })}
+        </g>
 
-      {/* motion beacons */}
-      <g style={{ pointerEvents: 'none' }}>
-        {beacons.map((b) =>
-          states[b.entity]?.state === 'on' ? (
-            <circle key={b.entity} cx={b.x} cy={b.y} r={13} fill="#e0b34c">
-              <animate attributeName="opacity" values="1;0.25;1" dur="1.6s" repeatCount="indefinite" />
-            </circle>
-          ) : null
-        )}
-      </g>
+        {/* labels + hit targets */}
+        <g>
+          {plan.rooms.map((r, i) => {
+            const live = knownRoom(r.name);
+            const isHover = hover === r.name;
+            const isSel = selected === r.name;
+            const cx = r.x + r.w / 2;
+            const cy = r.y + r.h / 2;
+            const fs = Math.max(20, Math.min(34, r.w / 9));
+            const showSqft = !!r.sqft && r.h > 110;
+            return (
+              <g
+                key={`l${i}`}
+                onClick={() => activate(r)}
+                onMouseEnter={() => setHover(r.name)}
+                onMouseLeave={() => setHover(null)}
+                style={{ cursor: live ? 'pointer' : 'default' }}
+              >
+                <rect
+                  x={r.x}
+                  y={r.y}
+                  width={r.w}
+                  height={r.h}
+                  rx={2}
+                  fill={(isHover || isSel) && live ? 'rgba(255,255,255,0.07)' : 'transparent'}
+                  stroke={isSel ? AMBER : isHover && live ? 'rgba(250,187,90,0.7)' : 'none'}
+                  strokeWidth={isSel ? 5 : 3}
+                  style={{ transition: 'fill 160ms ease' }}
+                />
+                {r.name ? (
+                  <text
+                    x={cx}
+                    y={showSqft ? cy - 4 : cy + 6}
+                    textAnchor="middle"
+                    fontSize={fs}
+                    fontWeight={600}
+                    fill={r.cold ? '#6e7a8c' : '#e6ecf5'}
+                    style={{ pointerEvents: 'none', userSelect: 'none' }}
+                  >
+                    {r.name}
+                  </text>
+                ) : null}
+                {showSqft ? (
+                  <text
+                    x={cx}
+                    y={cy + fs - 2}
+                    textAnchor="middle"
+                    fontSize={fs * 0.62}
+                    fill="#7d8a9c"
+                    style={{ pointerEvents: 'none', userSelect: 'none' }}
+                  >
+                    {r.sqft} sq ft
+                  </text>
+                ) : null}
+              </g>
+            );
+          })}
+        </g>
 
-      {/* front-of-house marker and compass */}
-      <g style={{ pointerEvents: 'none' }}>
-        <text x={PLAN_W / 2} y={PLAN_H - 28} textAnchor="middle" fontSize={26} fill="#7d8a9c">
-          FRONT · Wyoming Ave
-        </text>
-        <polygon
-          points={`${PLAN_W / 2 - 11},${PLAN_H - 20} ${PLAN_W / 2 + 11},${PLAN_H - 20} ${PLAN_W / 2},${PLAN_H - 4}`}
-          fill="#8f9cb0"
-        />
-        <line x1={52} y1={60} x2={116} y2={60} stroke={AMBER} strokeWidth={5} />
-        <polygon points="36,60 60,48 60,72" fill={AMBER} />
-        <text x={132} y={70} fontSize={24} fill={AMBER}>
-          N
-        </text>
-      </g>
-    </svg>
+        {/* motion beacons */}
+        <g style={{ pointerEvents: 'none' }}>
+          {beacons.map((b) =>
+            states[b.entity]?.state === 'on' ? (
+              <circle key={b.entity} cx={b.x} cy={b.y} r={13} fill="#e0b34c">
+                <animate attributeName="opacity" values="1;0.25;1" dur="1.6s" repeatCount="indefinite" />
+              </circle>
+            ) : null
+          )}
+        </g>
+
+        {/* front-of-house marker and compass */}
+        <g style={{ pointerEvents: 'none' }}>
+          <text x={PLAN_W / 2} y={PLAN_H - 28} textAnchor="middle" fontSize={26} fill="#7d8a9c">
+            FRONT · Wyoming Ave
+          </text>
+          <polygon
+            points={`${PLAN_W / 2 - 11},${PLAN_H - 20} ${PLAN_W / 2 + 11},${PLAN_H - 20} ${PLAN_W / 2},${PLAN_H - 4}`}
+            fill="#8f9cb0"
+          />
+          <line x1={52} y1={60} x2={116} y2={60} stroke={AMBER} strokeWidth={5} />
+          <polygon points="36,60 60,48 60,72" fill={AMBER} />
+          <text x={132} y={70} fontSize={24} fill={AMBER}>
+            N
+          </text>
+        </g>
+      </svg>
+
+      {selected && !onSelectRoom ? (
+        <RoomPanel hass={hass} floor={active} room={selected} onClose={() => setSelected(null)} />
+      ) : null}
+    </div>
   );
 }
+
+const tabsWrap: CSSProperties = {
+  position: 'absolute',
+  left: 10,
+  top: 10,
+  display: 'flex',
+  gap: 6,
+  zIndex: 4,
+};
+
+const tabStyle: CSSProperties = {
+  padding: '5px 12px',
+  borderRadius: 999,
+  fontSize: 11,
+  fontWeight: 600,
+  letterSpacing: '0.08em',
+  textTransform: 'uppercase',
+  cursor: 'pointer',
+  font: 'inherit',
+  color: 'rgba(230,236,245,0.62)',
+  background: 'rgba(10,14,20,0.7)',
+  backdropFilter: 'blur(8px)',
+  border: '1px solid rgba(255,255,255,0.10)',
+};
+
+const tabActive: CSSProperties = {
+  color: '#0d1218',
+  background: AMBER,
+  borderColor: AMBER,
+};
