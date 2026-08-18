@@ -7,6 +7,15 @@ export default defineConfig({
   esbuild: {
     jsx: 'automatic',
   },
+  // React reads process.env.NODE_ENV to pick its dev vs production path. Vite
+  // only substitutes that automatically for an *app* build — in library mode
+  // the reference survives into the bundle, and the module dies on load inside
+  // Home Assistant with "process is not defined". Substituting it here also
+  // drops React's dev-only warning machinery from the output.
+  define: {
+    'process.env.NODE_ENV': '"production"',
+    'process.env': '{}',
+  },
   build: {
     lib: {
       entry: 'src/main.tsx',
