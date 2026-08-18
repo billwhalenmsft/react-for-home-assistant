@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Estate Harness</title>
+<style>html,body{margin:0;background:#0a0c0e;}</style>
+</head>
+<body>
+<script src="./harness-states.js"></script>
+<script type="module">
+  import './dist/react-for-home-assistant.js';
+
+  const fakeConn = {
+    listeners: {},
+    addEventListener() {}, removeEventListener() {},
+    subscribeMessage(cb, _msg) { queueMicrotask(() => cb({ a: window.MOCK_ENTITIES })); return Promise.resolve(() => {}); },
+    subscribeEvents() { return Promise.resolve(() => {}); },
+    sendMessagePromise(msg) {
+      if (msg.type === 'get_states') {
+        return Promise.resolve(Object.entries(window.MOCK_ENTITIES).map(([id, e]) => ({
+          entity_id: id, state: e.s, attributes: e.a,
+          last_changed: new Date(e.lc * 1000).toISOString(), last_updated: new Date(e.lu * 1000).toISOString(),
+        })));
+      }
+      return Promise.resolve(null);
+    },
+  };
+
+  const states = {};
+  for (const [id, e] of Object.entries(window.MOCK_ENTITIES)) {
+    states[id] = { entity_id: id, state: e.s, attributes: e.a, last_changed: '', last_updated: '' };
+  }
+
+  const el = document.createElement('react-home-card');
+  el.setConfig({ type: 'custom:react-home-card', view: 'home' });
+  el.hass = {
+    states, connection: fakeConn, themes: {}, language: 'en',
+    user: { name: 'Bill', is_admin: true },
+    callService: async (d, s, data, target) => console.log('callService', d, s, data, target),
+  };
+  document.body.appendChild(el);
+</script>
+</body>
+</html>
