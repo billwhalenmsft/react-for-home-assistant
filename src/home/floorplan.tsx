@@ -40,7 +40,7 @@ const ROOM_ENTITY: Record<string, Record<string, string>> = {
     Dining: 'light.dining_room_dining_room_chandelier',
     Entry: 'light.front_foyer_front_foyer_main_lights',
     Mud: 'light.mudroom_mudroom_main_lights',
-    Garage: 'cover.garage',
+    Garage: 'cover.ratgdov2_5i_f83dae_door',
   },
   fp_upper: {
     Laundry: 'sensor.laundry_room_washer_machine_state',
