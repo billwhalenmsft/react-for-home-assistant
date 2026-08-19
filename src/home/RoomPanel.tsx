@@ -30,11 +30,14 @@ export function RoomPanel({
   floor,
   room,
   onClose,
+  /** 'overlay' pins it to the floorplan; 'inline' lets a parent place it */
+  variant = 'overlay',
 }: {
   hass: Hass;
   floor: string;
   room: string;
   onClose: () => void;
+  variant?: 'overlay' | 'inline';
 }) {
   const spec = ROOM_DEVICES[floor]?.[room];
   const ids = spec?.entities ?? [];
@@ -58,7 +61,7 @@ export function RoomPanel({
     ['light', 'switch', 'fan', 'cover', 'lock', 'media_player'].includes(id.split('.')[0]);
 
   return (
-    <div style={S.wrap} role="dialog" aria-label={`${room} controls`}>
+    <div style={variant === 'inline' ? { ...S.wrap, ...S.inline } : S.wrap} role="dialog" aria-label={`${room} controls`}>
       <div style={S.head}>
         <div>
           <div style={S.title}>{room}</div>
@@ -132,6 +135,11 @@ const S = {
     border: '1px solid var(--wt-line)',
     boxShadow: '0 18px 50px rgba(0,0,0,0.55)',
     zIndex: 5,
+  } as CSSProperties,
+  inline: {
+    position: 'static',
+    width: '100%',
+    maxHeight: '80vh',
   } as CSSProperties,
   head: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 10 } as CSSProperties,
   title: { fontSize: 17, fontWeight: 700, color: 'var(--wt-text)' } as CSSProperties,

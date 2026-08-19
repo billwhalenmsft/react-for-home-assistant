@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from
 import { useEntities } from '../ha/useEntities';
 import type { Hass, HassEntity } from '../ha/types';
 import { Floorplan } from './floorplan';
+import { RoomsGrid } from './RoomsGrid';
 import { THEME_CSS } from './theme';
 import { HousePulse, ForecastStrip } from './pulse';
 
@@ -820,78 +821,11 @@ function SkySummary({ hass, onMore }: { hass: Hass; onMore?: () => void }) {
 /* ================================================================ rooms */
 
 function RoomsPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
-  const ids = useMemo(() => [
-    E.allLights, E.autopilotHue, E.autopilotDim,
-    ...E.fixtures.map(([, id]) => id), ...E.rooms.map((r) => r.temp).filter(Boolean) as string[],
-  ], []);
-  const e = useEntities(hass, ids);
-  const cols = narrow ? 1 : 3;
-
-  const toggleFixture = (id: string) => {
-    const on = e[id]?.state === 'on';
-    void hass.callService('light', on ? 'turn_off' : 'turn_on', {}, { entity_id: id });
-  };
-
-  return (
-    <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
-      <Glass span={cols} style={{ padding: '18px 22px', display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
-        <span style={LABEL}>Master</span>
-        <Pill tone="gold" onClick={() => void hass.callService('light', 'turn_on', {}, { entity_id: E.allLights })}>All On</Pill>
-        <Pill onClick={() => void hass.callService('light', 'turn_off', {}, { entity_id: E.allLights })}>All Off</Pill>
-        <span style={{ flex: 1 }} />
-        <span style={LABEL}>Autopilot</span>
-        {([['Hue', E.autopilotHue], ['Dimmers', E.autopilotDim]] as const).map(([label, id]) => (
-          <Pill key={id} active={e[id]?.state === 'on'}
-            onClick={() => void hass.callService('switch', 'toggle', {}, { entity_id: id })}>
-            {label}
-          </Pill>
-        ))}
-      </Glass>
-
-      {E.fixtures.map(([name, id]) => {
-        const ent = e[id];
-        const on = ent?.state === 'on';
-        const briRaw = attr(ent, 'brightness') as number | undefined;
-        const dimmable = briRaw !== undefined || on;
-        return (
-          <Glass key={id}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <button
-                type="button" onClick={() => toggleFixture(id)} className="est-lift"
-                aria-label={`Toggle ${name}`}
-                style={{
-                  width: 46, height: 46, borderRadius: 15, display: 'grid', placeItems: 'center', cursor: 'pointer',
-                  border: `1px solid ${on ? T.goldDeep : T.line}`,
-                  background: on ? `linear-gradient(170deg, ${T.gold}, ${T.goldDeep})` : 'rgba(255,255,255,0.05)',
-                  color: on ? '#191408' : T.dim,
-                }}
-              >
-                <Icon d={P.bulb} size={21} />
-              </button>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 15.5, fontWeight: 400 }}>{name}</div>
-                <div style={{ fontSize: 11.5, color: on ? T.gold : T.faint }}>
-                  {on ? (briRaw != null ? `${Math.round(briRaw / 2.55)}%` : 'On') : 'Off'}
-                </div>
-              </div>
-            </div>
-            {on && dimmable && briRaw != null && (
-              <div style={{ marginTop: 10 }}>
-                <GoldSlider
-                  value={briRaw / 2.55}
-                  ariaLabel={`${name} brightness`}
-                  onChange={(v) => void hass.callService('light', 'turn_on', { brightness_pct: Math.round(v) }, { entity_id: id })}
-                />
-              </div>
-            )}
-          </Glass>
-        );
-      })}
-    </div>
-  );
+  // Was a flat list of every fixture in the house. Rooms are now browsed
+  // room-first — pick the room, then what's in it — which is how this kind of
+  // system is meant to read. See RoomsGrid.
+  return <RoomsGrid hass={hass} narrow={narrow} />;
 }
-
-/* =============================================================== cinema */
 
 function CinemaPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const ids = useMemo(() => [E.frame, E.marantz, ...E.sonos.map(([, id]) => id)], []);
