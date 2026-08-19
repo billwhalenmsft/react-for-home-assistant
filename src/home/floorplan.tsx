@@ -40,7 +40,8 @@ const ROOM_ENTITY: Record<string, Record<string, string>> = {
     Dining: 'light.dining_room_dining_room_chandelier',
     Entry: 'light.front_foyer_front_foyer_main_lights',
     Mud: 'light.mudroom_mudroom_main_lights',
-    Garage: 'cover.garage_single_door',
+    'Single Bay': 'cover.garage_single_door',
+    'Double Bay': 'cover.garage_door_2',
   },
   fp_upper: {
     Laundry: 'sensor.laundry_room_washer_machine_state',
@@ -49,6 +50,18 @@ const ROOM_ENTITY: Record<string, Record<string, string>> = {
   fp_lower: {
     'Family Room': 'media_player.family_room_family_room',
   },
+};
+
+/**
+ * Overhead doors on the front facade. Drawn as a bar across the bottom edge of
+ * their bay: solid when shut, broken open with light spilling out when not —
+ * so an open door is obvious from across the room, not just a colour shift.
+ */
+const DOORS: Record<string, Array<{ room: string; entity: string }>> = {
+  fp_main: [
+    { room: 'Single Bay', entity: 'cover.garage_single_door' },
+    { room: 'Double Bay', entity: 'cover.garage_door_2' },
+  ],
 };
 
 /** Motion beacons, positioned in plan space. */
@@ -80,11 +93,12 @@ export function Floorplan({ hass, floor, onSelectRoom, height = '100%' }: Floorp
   const plan = FLOORS[active] ?? FLOORS.fp_main;
   const map = useMemo(() => ROOM_ENTITY[active] ?? {}, [active]);
   const beacons = useMemo(() => BEACONS[active] ?? [], [active]);
+  const doors = useMemo(() => DOORS[active] ?? [], [active]);
 
   // only what this floor draws — see ha/useEntities for why this matters
   const ids = useMemo(
-    () => [...Object.values(map), ...beacons.map((b) => b.entity)],
-    [map, beacons]
+    () => [...Object.values(map), ...beacons.map((b) => b.entity), ...doors.map((d) => d.entity)],
+    [map, beacons, doors]
   );
   const states = useEntities(hass, ids);
 
@@ -173,6 +187,55 @@ export function Floorplan({ hass, floor, onSelectRoom, height = '100%' }: Floorp
                 opacity={0.3 + 0.45 * b}
                 style={{ transition: 'opacity 420ms ease' }}
               />
+            );
+          })}
+        </g>
+
+        {/* overhead doors on the front facade */}
+        <g>
+          {doors.map((d) => {
+            const r = plan.rooms.find((x) => x.name === d.room);
+            if (!r) return null;
+            const open = states[d.entity]?.state === 'open';
+            const moving = ['opening', 'closing'].includes(states[d.entity]?.state ?? '');
+            const y = r.y + r.h - 7;          // the front wall of the bay
+            const inset = 26;
+            const x1 = r.x + inset;
+            const x2 = r.x + r.w - inset;
+            const stub = (x2 - x1) * 0.16;
+            return (
+              <g key={d.entity} style={{ pointerEvents: 'none' }}>
+                {open ? (
+                  <>
+                    {/* light spilling out of the opening */}
+                    <rect
+                      x={x1} y={y - 4} width={x2 - x1} height={54}
+                      fill={AMBER} opacity={0.5} filter="url(#fp-pool)"
+                    />
+                    {/* door retracted — only the jamb stubs remain */}
+                    <line x1={x1} y1={y} x2={x1 + stub} y2={y} stroke={AMBER} strokeWidth={11} strokeLinecap="round" />
+                    <line x1={x2 - stub} y1={y} x2={x2} y2={y} stroke={AMBER} strokeWidth={11} strokeLinecap="round" />
+                    <text
+                      x={(x1 + x2) / 2} y={y - 16} textAnchor="middle"
+                      fontSize={26} fontWeight={700} fill={AMBER} letterSpacing="2"
+                    >
+                      OPEN
+                    </text>
+                  </>
+                ) : (
+                  <line
+                    x1={x1} y1={y} x2={x2} y2={y}
+                    stroke={moving ? AMBER : 'var(--wt-planWall)'}
+                    strokeWidth={11}
+                    strokeLinecap="round"
+                    strokeDasharray={moving ? '26 18' : undefined}
+                  >
+                    {moving ? (
+                      <animate attributeName="stroke-dashoffset" values="0;-44" dur="1s" repeatCount="indefinite" />
+                    ) : null}
+                  </line>
+                )}
+              </g>
             );
           })}
         </g>

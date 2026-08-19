@@ -55,17 +55,19 @@ export const ROOM_DEVICES: Record<string, Record<string, RoomDevices>> = {
     Mud: {
       entities: ['light.mudroom_mudroom_main_lights', 'binary_sensor.garage_entry_door'],
     },
-    Garage: {
+    'Single Bay': {
       entities: [
         'cover.garage_single_door',
         'light.garage_single_light',
         'lock.garage_single_remotes',
         'binary_sensor.garage_single_obstruction',
         'binary_sensor.garage_single_motion',
-        // second door is still the alarm.com cloud entity until its board is flashed
-        'cover.garage_door_2',
       ],
-      note: '8×8 single bay on ratgdo (local) · 16×8 double still via alarm.com',
+      note: "8'x8' bay — ratgdo, local control",
+    },
+    'Double Bay': {
+      entities: ['cover.garage_door_2'],
+      note: "16'x8' bay — still alarm.com until its board is flashed",
     },
     Porch: {
       entities: ['binary_sensor.front_porch_motion'],
