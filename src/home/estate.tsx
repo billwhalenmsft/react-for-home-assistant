@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from
 import { useEntities } from '../ha/useEntities';
 import type { Hass, HassEntity } from '../ha/types';
 import { Floorplan } from './floorplan';
+import { useTheme, THEME_CSS } from './theme';
+import { ThemeSwitch } from './ThemeSwitch';
 import { HousePulse, ForecastStrip } from './pulse';
 
 /**
@@ -17,23 +19,28 @@ import { HousePulse, ForecastStrip } from './pulse';
 
 /* ================================================================ tokens */
 
+// Tokens resolve to CSS variables so the whole surface can be re-themed by
+// swapping variable values on the root — see theme.ts. Nothing here does
+// colour maths, which is what makes var() safe to drop in everywhere,
+// including inside gradient strings.
 const T = {
-  ground: '#0a0c0e',
-  glass: 'rgba(255,255,255,0.038)',
-  glassHi: 'rgba(255,255,255,0.065)',
-  line: 'rgba(255,255,255,0.08)',
-  lineHi: 'rgba(211,176,110,0.45)',
-  text: '#f0ede6',
-  dim: '#97917f',
-  faint: '#605b4e',
-  gold: '#d3b06e',
-  goldHi: '#e8cf96',
-  goldDeep: '#a8814a',
-  ok: '#7ac48f',
-  warn: '#e0b34c',
-  alert: '#e0795f',
-  info: '#7fb4d1',
-  radius: 22,
+  ground: 'var(--wt-ground)',
+  glass: 'var(--wt-glass)',
+  glassHi: 'var(--wt-glassHi)',
+  line: 'var(--wt-line)',
+  lineHi: 'var(--wt-lineHi)',
+  text: 'var(--wt-text)',
+  dim: 'var(--wt-dim)',
+  faint: 'var(--wt-faint)',
+  gold: 'var(--wt-gold)',
+  goldHi: 'var(--wt-goldHi)',
+  goldDeep: 'var(--wt-goldDeep)',
+  ok: 'var(--wt-ok)',
+  warn: 'var(--wt-warn)',
+  alert: 'var(--wt-alert)',
+  info: 'var(--wt-info)',
+  onAccent: 'var(--wt-onAccent)',
+  radius: 'var(--wt-radius)',
   font: `'Segoe UI', 'Helvetica Neue', system-ui, -apple-system, sans-serif`,
 };
 
@@ -327,21 +334,24 @@ const NAV: ReadonlyArray<{ id: Page; label: string; icon: string }> = [
 export function EstateApp({ hass }: { hass: Hass }) {
   const [page, setPage] = useState<Page>('home');
   const narrow = useNarrow();
+  const [theme, setTheme] = useTheme();
 
   return (
     <div
       className="est-root"
+      data-wt-theme={theme}
       style={{
         minHeight: '100vh', color: T.text, background:
-          `radial-gradient(1100px 500px at 75% -8%, rgba(211,176,110,0.09), transparent 60%),
-           radial-gradient(900px 500px at -10% 108%, rgba(88,128,150,0.10), transparent 55%),
+          `radial-gradient(1100px 500px at 75% -8%, var(--wt-ambientA), transparent 60%),
+           radial-gradient(900px 500px at -10% 108%, var(--wt-ambientB), transparent 55%),
            ${T.ground}`,
         display: 'flex', flexDirection: narrow ? 'column' : 'row',
       }}
     >
+      <style>{THEME_CSS}</style>
       <style>{GLOBAL_CSS}</style>
 
-      {!narrow && <Rail page={page} setPage={setPage} />}
+      {!narrow && <Rail page={page} setPage={setPage} theme={theme} setTheme={setTheme} />}
 
       <main style={{
         flex: 1, minWidth: 0, padding: narrow ? '20px 16px 96px' : '30px 38px 48px',
@@ -363,7 +373,9 @@ export function EstateApp({ hass }: { hass: Hass }) {
   );
 }
 
-function Rail({ page, setPage }: { page: Page; setPage: (p: Page) => void }) {
+function Rail({ page, setPage, theme, setTheme }: {
+  page: Page; setPage: (p: Page) => void; theme: string; setTheme: (id: string) => void;
+}) {
   return (
     <nav aria-label="Sections" style={{
       width: 86, flex: 'none', borderRight: `1px solid ${T.line}`,
@@ -372,7 +384,7 @@ function Rail({ page, setPage }: { page: Page; setPage: (p: Page) => void }) {
     }}>
       <div style={{
         width: 40, height: 40, borderRadius: 13, display: 'grid', placeItems: 'center',
-        background: `linear-gradient(160deg, ${T.gold}, ${T.goldDeep})`, color: '#191408',
+        background: `linear-gradient(160deg, ${T.gold}, ${T.goldDeep})`, color: T.onAccent,
         fontWeight: 800, fontSize: 17, letterSpacing: '-0.02em', marginBottom: 18,
         boxShadow: '0 6px 24px rgba(211,176,110,0.3)',
       }}>W</div>
@@ -398,6 +410,9 @@ function Rail({ page, setPage }: { page: Page; setPage: (p: Page) => void }) {
           </button>
         );
       })}
+      <div style={{ marginTop: 'auto', paddingTop: 18 }}>
+        <ThemeSwitch value={theme} onChange={setTheme} />
+      </div>
     </nav>
   );
 }

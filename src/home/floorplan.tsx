@@ -131,7 +131,7 @@ export function Floorplan({ hass, floor, onSelectRoom, height = '100%' }: Floorp
         </defs>
 
         {/* thick strokes behind the fills — see header note */}
-        <g fill="none" stroke="#8f9cb0" strokeWidth={14} strokeLinejoin="round">
+        <g fill="none" stroke="var(--wt-planWall)" strokeWidth={14} strokeLinejoin="round">
           {plan.rooms.map((r, i) => (
             <rect key={`w${i}`} x={r.x} y={r.y} width={r.w} height={r.h} rx={3} />
           ))}
@@ -154,7 +154,10 @@ export function Floorplan({ hass, floor, onSelectRoom, height = '100%' }: Floorp
           ))}
         </g>
 
-        {/* light pooling */}
+        {/* lightens the floor materials on light themes so labels stay legible */}
+      <rect x={0} y={0} width={PLAN_W} height={PLAN_H} fill="var(--wt-planWash)" style={{ pointerEvents: 'none' }} />
+
+      {/* light pooling */}
         <g style={{ pointerEvents: 'none' }} filter="url(#fp-pool)">
           {plan.rooms.map((r, i) => {
             const b = brightnessOf(map[r.name]);
@@ -210,7 +213,7 @@ export function Floorplan({ hass, floor, onSelectRoom, height = '100%' }: Floorp
                     textAnchor="middle"
                     fontSize={fs}
                     fontWeight={600}
-                    fill={r.cold ? '#6e7a8c' : '#e6ecf5'}
+                    fill={r.cold ? 'var(--wt-dim)' : 'var(--wt-text)'}
                     style={{ pointerEvents: 'none', userSelect: 'none' }}
                   >
                     {r.name}
@@ -222,7 +225,7 @@ export function Floorplan({ hass, floor, onSelectRoom, height = '100%' }: Floorp
                     y={cy + fs - 2}
                     textAnchor="middle"
                     fontSize={fs * 0.62}
-                    fill="#7d8a9c"
+                    fill="var(--wt-dim)"
                     style={{ pointerEvents: 'none', userSelect: 'none' }}
                   >
                     {r.sqft} sq ft
@@ -246,12 +249,12 @@ export function Floorplan({ hass, floor, onSelectRoom, height = '100%' }: Floorp
 
         {/* front-of-house marker and compass */}
         <g style={{ pointerEvents: 'none' }}>
-          <text x={PLAN_W / 2} y={PLAN_H - 28} textAnchor="middle" fontSize={26} fill="#7d8a9c">
+          <text x={PLAN_W / 2} y={PLAN_H - 28} textAnchor="middle" fontSize={26} fill="var(--wt-dim)">
             FRONT · Wyoming Ave
           </text>
           <polygon
             points={`${PLAN_W / 2 - 11},${PLAN_H - 20} ${PLAN_W / 2 + 11},${PLAN_H - 20} ${PLAN_W / 2},${PLAN_H - 4}`}
-            fill="#8f9cb0"
+            fill="var(--wt-planWall)"
           />
           <line x1={52} y1={60} x2={116} y2={60} stroke={AMBER} strokeWidth={5} />
           <polygon points="36,60 60,48 60,72" fill={AMBER} />
