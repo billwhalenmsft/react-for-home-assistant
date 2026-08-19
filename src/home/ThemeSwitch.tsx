@@ -19,9 +19,12 @@ export function ThemeSwitch({
       role="radiogroup"
       aria-label="Theme"
       style={{
-        display: 'flex',
-        flexDirection: vertical ? 'column' : 'row',
-        gap: 7,
+        // 2x2 in the rail rather than a single column: four stacked swatches
+        // pushed the last one below the fold on shorter viewports.
+        display: 'grid',
+        gridTemplateColumns: vertical ? 'repeat(2, auto)' : `repeat(${'4'}, auto)`,
+        gap: 8,
+        justifyContent: 'center',
         alignItems: 'center',
       }}
     >

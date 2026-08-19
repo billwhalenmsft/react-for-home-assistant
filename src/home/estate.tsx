@@ -368,7 +368,7 @@ export function EstateApp({ hass }: { hass: Hass }) {
         </div>
       </main>
 
-      {narrow && <BottomBar page={page} setPage={setPage} />}
+      {narrow && <BottomBar page={page} setPage={setPage} theme={theme} setTheme={setTheme} />}
     </div>
   );
 }
@@ -417,13 +417,15 @@ function Rail({ page, setPage, theme, setTheme }: {
   );
 }
 
-function BottomBar({ page, setPage }: { page: Page; setPage: (p: Page) => void }) {
+function BottomBar({ page, setPage, theme, setTheme }: {
+  page: Page; setPage: (p: Page) => void; theme: string; setTheme: (id: string) => void;
+}) {
   return (
     <nav aria-label="Sections" style={{
       position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 40,
       display: 'flex', justifyContent: 'space-around',
       padding: '10px 8px calc(10px + env(safe-area-inset-bottom))',
-      background: 'rgba(10,12,14,0.82)', backdropFilter: 'blur(22px)', WebkitBackdropFilter: 'blur(22px)',
+      background: T.ground, backdropFilter: 'blur(22px)', WebkitBackdropFilter: 'blur(22px)',
       borderTop: `1px solid ${T.line}`,
     }}>
       {NAV.map((n) => {
@@ -442,6 +444,9 @@ function BottomBar({ page, setPage }: { page: Page; setPage: (p: Page) => void }
           </button>
         );
       })}
+      <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 6 }}>
+        <ThemeSwitch value={theme} onChange={setTheme} vertical={false} />
+      </div>
     </nav>
   );
 }
