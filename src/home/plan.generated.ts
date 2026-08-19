@@ -4,10 +4,8 @@
 // (Elevation B, 'Garage Side: Right'). No rotation: the front facade sits
 // along the BOTTOM facing the viewer. North points LEFT.
 //
-// Room identities corrected by Bill 2026-08-18: the pantry is the corner, the
-// back hall is an L running east behind the kitchen then north behind the
-// dining to the office and bath, and the walk-in closet is part of the mud
-// room rather than a room of its own.
+// The canvas is taller than the traced footprint because the deck sits
+// outside it, off the back wall; Y_SHIFT moves everything down to suit.
 
 export interface PlanRoom {
   name: string;
@@ -19,7 +17,7 @@ export interface PlanRoom {
 }
 
 export const PLAN_W = 1300;
-export const PLAN_H = 1600;
+export const PLAN_H = 1920;
 export const PX_PER_FT = 26;
 
 export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
@@ -30,7 +28,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Study",
         "x": 886,
-        "y": 53,
+        "y": 373,
         "w": 346,
         "h": 307,
         "cold": false,
@@ -41,7 +39,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Dining",
         "x": 535,
-        "y": 53,
+        "y": 373,
         "w": 346,
         "h": 359,
         "cold": false,
@@ -52,7 +50,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Great Room",
         "x": 67,
-        "y": 261,
+        "y": 581,
         "w": 463,
         "h": 411,
         "cold": false,
@@ -63,7 +61,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Bath",
         "x": 1029,
-        "y": 365,
+        "y": 685,
         "w": 203,
         "h": 203,
         "cold": false,
@@ -74,7 +72,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Back Hall",
         "x": 886,
-        "y": 365,
+        "y": 685,
         "w": 138,
         "h": 203,
         "cold": false,
@@ -85,7 +83,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Kitchen",
         "x": 535,
-        "y": 417,
+        "y": 737,
         "w": 346,
         "h": 307,
         "cold": false,
@@ -96,7 +94,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Mud",
         "x": 886,
-        "y": 573,
+        "y": 893,
         "w": 346,
         "h": 281,
         "cold": false,
@@ -107,7 +105,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Entry",
         "x": 249,
-        "y": 677,
+        "y": 997,
         "w": 281,
         "h": 255,
         "cold": false,
@@ -118,7 +116,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Stairs",
         "x": 67,
-        "y": 677,
+        "y": 997,
         "w": 177,
         "h": 260,
         "cold": false,
@@ -129,7 +127,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "",
         "x": 717,
-        "y": 729,
+        "y": 1049,
         "w": 164,
         "h": 125,
         "cold": false,
@@ -140,7 +138,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Pantry",
         "x": 535,
-        "y": 729,
+        "y": 1049,
         "w": 182,
         "h": 125,
         "cold": false,
@@ -149,9 +147,20 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
         "paint": null
       },
       {
+        "name": "Deck",
+        "x": 535,
+        "y": 20,
+        "w": 697,
+        "h": 353,
+        "cold": true,
+        "material": "wood",
+        "sqft": null,
+        "paint": null
+      },
+      {
         "name": "Double Bay",
         "x": 767,
-        "y": 858,
+        "y": 1178,
         "w": 466,
         "h": 569,
         "cold": true,
@@ -162,7 +171,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Single Bay",
         "x": 534,
-        "y": 858,
+        "y": 1178,
         "w": 233,
         "h": 569,
         "cold": true,
@@ -173,8 +182,8 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Porch",
         "x": 66,
-        "y": 936,
-        "w": 387,
+        "y": 1256,
+        "w": 468,
         "h": 153,
         "cold": true,
         "material": "wood",
@@ -189,7 +198,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Bedroom 4",
         "x": 873,
-        "y": 53,
+        "y": 373,
         "w": 359,
         "h": 307,
         "cold": false,
@@ -204,7 +213,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Bath 2",
         "x": 717,
-        "y": 53,
+        "y": 373,
         "w": 151,
         "h": 203,
         "cold": false,
@@ -215,7 +224,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Master Bath",
         "x": 509,
-        "y": 53,
+        "y": 373,
         "w": 203,
         "h": 255,
         "cold": false,
@@ -226,7 +235,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Master Bedroom",
         "x": 67,
-        "y": 157,
+        "y": 477,
         "w": 437,
         "h": 411,
         "cold": false,
@@ -237,7 +246,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Laundry",
         "x": 717,
-        "y": 313,
+        "y": 633,
         "w": 151,
         "h": 151,
         "cold": false,
@@ -248,7 +257,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "W.I.C.",
         "x": 509,
-        "y": 313,
+        "y": 633,
         "w": 203,
         "h": 151,
         "cold": false,
@@ -259,7 +268,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Bath 1",
         "x": 1029,
-        "y": 365,
+        "y": 685,
         "w": 203,
         "h": 203,
         "cold": false,
@@ -270,7 +279,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Hall",
         "x": 873,
-        "y": 365,
+        "y": 685,
         "w": 151,
         "h": 203,
         "cold": false,
@@ -281,7 +290,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Bedroom 3",
         "x": 873,
-        "y": 573,
+        "y": 893,
         "w": 359,
         "h": 307,
         "cold": false,
@@ -296,7 +305,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Bedroom 2",
         "x": 457,
-        "y": 573,
+        "y": 893,
         "w": 411,
         "h": 307,
         "cold": false,
@@ -311,7 +320,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Loft",
         "x": 249,
-        "y": 573,
+        "y": 893,
         "w": 203,
         "h": 255,
         "cold": false,
@@ -322,7 +331,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Stairs",
         "x": 67,
-        "y": 573,
+        "y": 893,
         "w": 177,
         "h": 307,
         "cold": false,
@@ -333,7 +342,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "",
         "x": 505,
-        "y": 460,
+        "y": 780,
         "w": 370,
         "h": 110,
         "cold": false,
@@ -344,7 +353,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "",
         "x": 710,
-        "y": 250,
+        "y": 570,
         "w": 165,
         "h": 65,
         "cold": false,
@@ -360,7 +369,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Future Bedroom",
         "x": 872,
-        "y": 52,
+        "y": 372,
         "w": 361,
         "h": 309,
         "cold": true,
@@ -371,7 +380,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Rec Room (future)",
         "x": 456,
-        "y": 104,
+        "y": 424,
         "w": 413,
         "h": 309,
         "cold": true,
@@ -382,7 +391,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Family Room",
         "x": 67,
-        "y": 157,
+        "y": 477,
         "w": 385,
         "h": 567,
         "cold": false,
@@ -393,7 +402,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Future Bath",
         "x": 1028,
-        "y": 364,
+        "y": 684,
         "w": 205,
         "h": 205,
         "cold": true,
@@ -404,7 +413,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Mechanical",
         "x": 717,
-        "y": 417,
+        "y": 737,
         "w": 307,
         "h": 255,
         "cold": false,
@@ -415,7 +424,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Hall",
         "x": 457,
-        "y": 417,
+        "y": 737,
         "w": 255,
         "h": 255,
         "cold": false,
@@ -426,7 +435,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Bedroom",
         "x": 873,
-        "y": 677,
+        "y": 997,
         "w": 359,
         "h": 255,
         "cold": false,
@@ -437,7 +446,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Stairs",
         "x": 67,
-        "y": 729,
+        "y": 1049,
         "w": 177,
         "h": 307,
         "cold": false,
@@ -448,7 +457,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "",
         "x": 873,
-        "y": 364,
+        "y": 684,
         "w": 152,
         "h": 49,
         "cold": true,
@@ -459,7 +468,7 @@ export const FLOORS: Record<string, { title: string; rooms: PlanRoom[] }> =
       {
         "name": "Unexcavated",
         "x": 534,
-        "y": 988,
+        "y": 1308,
         "w": 699,
         "h": 439,
         "cold": true,
