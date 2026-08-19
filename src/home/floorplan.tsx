@@ -123,18 +123,10 @@ export function Floorplan({ hass, floor, onSelectRoom, height = '100%' }: Floorp
   return (
     <div style={{ position: 'relative' }}>
       {!floor && (
-        <div style={tabsWrap}>
-          {FLOOR_TABS.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => { setTab(t.key); setSelected(null); }}
-              style={{ ...tabStyle, ...(active === t.key ? tabActive : null) }}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+        <FloorSelect
+          value={active}
+          onChange={(k) => { setTab(k); setSelected(null); }}
+        />
       )}
 
       <svg viewBox={`0 0 ${PLAN_W} ${PLAN_H}`} style={svgStyle} role="img" aria-label={`${plan.title} floorplan`}>
@@ -334,32 +326,111 @@ export function Floorplan({ hass, floor, onSelectRoom, height = '100%' }: Floorp
   );
 }
 
-const tabsWrap: CSSProperties = {
+/**
+ * Floor picker. One control rather than three buttons, parked bottom-left so
+ * it sits over the empty corner of the plan instead of covering rooms.
+ */
+function FloorSelect({ value, onChange }: { value: string; onChange: (k: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const current = FLOOR_TABS.find((t) => t.key === value) ?? FLOOR_TABS[0];
+
+  return (
+    <div style={selWrap}>
+      {open && (
+        <div style={selMenu} role="listbox">
+          {FLOOR_TABS.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              role="option"
+              aria-selected={t.key === value}
+              onClick={() => { onChange(t.key); setOpen(false); }}
+              style={{ ...selItem, ...(t.key === value ? selItemOn : null) }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        style={selButton}
+      >
+        <span>{current.label}</span>
+        <svg width="10" height="6" viewBox="0 0 10 6" aria-hidden="true">
+          <path
+            d={open ? 'M1 5L5 1l4 4' : 'M1 1l4 4 4-4'}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+          />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+const selWrap: CSSProperties = {
   position: 'absolute',
-  left: 10,
-  top: 10,
-  display: 'flex',
-  gap: 6,
+  left: 12,
+  bottom: 12,
   zIndex: 4,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'flex-start',
+  gap: 6,
 };
 
-const tabStyle: CSSProperties = {
-  padding: '5px 12px',
-  borderRadius: 999,
+const selButton: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: '7px 12px',
+  borderRadius: 'var(--wt-radius)',
   fontSize: 11,
   fontWeight: 600,
-  letterSpacing: '0.08em',
+  letterSpacing: '0.09em',
   textTransform: 'uppercase',
   cursor: 'pointer',
   font: 'inherit',
-  color: 'rgba(230,236,245,0.62)',
-  background: 'rgba(10,14,20,0.7)',
-  backdropFilter: 'blur(8px)',
-  border: '1px solid rgba(255,255,255,0.10)',
+  color: 'var(--wt-text)',
+  background: 'var(--wt-glassHi)',
+  backdropFilter: 'blur(10px)',
+  WebkitBackdropFilter: 'blur(10px)',
+  border: '1px solid var(--wt-line)',
 };
 
-const tabActive: CSSProperties = {
-  color: '#0d1218',
-  background: AMBER,
-  borderColor: AMBER,
+const selMenu: CSSProperties = {
+  display: 'grid',
+  gap: 2,
+  padding: 4,
+  borderRadius: 'var(--wt-radius)',
+  background: 'var(--wt-ground)',
+  border: '1px solid var(--wt-line)',
+  boxShadow: '0 14px 34px rgba(0,0,0,0.45)',
+  minWidth: 116,
+};
+
+const selItem: CSSProperties = {
+  padding: '7px 12px',
+  borderRadius: 'calc(var(--wt-radius) / 2)',
+  fontSize: 11,
+  fontWeight: 600,
+  letterSpacing: '0.09em',
+  textTransform: 'uppercase',
+  textAlign: 'left',
+  cursor: 'pointer',
+  font: 'inherit',
+  color: 'var(--wt-dim)',
+  background: 'transparent',
+  border: 'none',
+};
+
+const selItemOn: CSSProperties = {
+  color: 'var(--wt-onAccent)',
+  background: 'var(--wt-gold)',
 };
