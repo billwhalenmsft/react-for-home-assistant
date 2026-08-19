@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from
 import { useEntities } from '../ha/useEntities';
 import type { Hass, HassEntity } from '../ha/types';
 import { Floorplan } from './floorplan';
-import { useTheme, THEME_CSS } from './theme';
-import { ThemeSwitch } from './ThemeSwitch';
+import { THEME_CSS } from './theme';
 import { HousePulse, ForecastStrip } from './pulse';
 
 /**
@@ -334,7 +333,12 @@ const NAV: ReadonlyArray<{ id: Page; label: string; icon: string }> = [
 export function EstateApp({ hass }: { hass: Hass }) {
   const [page, setPage] = useState<Page>('home');
   const narrow = useNarrow();
-  const [theme, setTheme] = useTheme();
+
+  // Themes are built and shipped (see theme.ts) but the picker is hidden for
+  // now, so this is pinned to the default. To re-enable: import useTheme,
+  // swap this line for `const [theme, setTheme] = useTheme();`, and put
+  // <ThemeSwitch value={theme} onChange={setTheme} /> back in the rail.
+  const theme = 'estate';
 
   return (
     <div
@@ -351,7 +355,7 @@ export function EstateApp({ hass }: { hass: Hass }) {
       <style>{THEME_CSS}</style>
       <style>{GLOBAL_CSS}</style>
 
-      {!narrow && <Rail page={page} setPage={setPage} theme={theme} setTheme={setTheme} />}
+      {!narrow && <Rail page={page} setPage={setPage} />}
 
       <main style={{
         flex: 1, minWidth: 0, padding: narrow ? '20px 16px 96px' : '30px 38px 48px',
@@ -368,14 +372,12 @@ export function EstateApp({ hass }: { hass: Hass }) {
         </div>
       </main>
 
-      {narrow && <BottomBar page={page} setPage={setPage} theme={theme} setTheme={setTheme} />}
+      {narrow && <BottomBar page={page} setPage={setPage} />}
     </div>
   );
 }
 
-function Rail({ page, setPage, theme, setTheme }: {
-  page: Page; setPage: (p: Page) => void; theme: string; setTheme: (id: string) => void;
-}) {
+function Rail({ page, setPage }: { page: Page; setPage: (p: Page) => void }) {
   return (
     <nav aria-label="Sections" style={{
       width: 86, flex: 'none', borderRight: `1px solid ${T.line}`,
@@ -410,22 +412,17 @@ function Rail({ page, setPage, theme, setTheme }: {
           </button>
         );
       })}
-      <div style={{ marginTop: 'auto', paddingTop: 18 }}>
-        <ThemeSwitch value={theme} onChange={setTheme} />
-      </div>
     </nav>
   );
 }
 
-function BottomBar({ page, setPage, theme, setTheme }: {
-  page: Page; setPage: (p: Page) => void; theme: string; setTheme: (id: string) => void;
-}) {
+function BottomBar({ page, setPage }: { page: Page; setPage: (p: Page) => void }) {
   return (
     <nav aria-label="Sections" style={{
       position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 40,
       display: 'flex', justifyContent: 'space-around',
       padding: '10px 8px calc(10px + env(safe-area-inset-bottom))',
-      background: T.ground, backdropFilter: 'blur(22px)', WebkitBackdropFilter: 'blur(22px)',
+      background: 'rgba(10,12,14,0.82)', backdropFilter: 'blur(22px)', WebkitBackdropFilter: 'blur(22px)',
       borderTop: `1px solid ${T.line}`,
     }}>
       {NAV.map((n) => {
@@ -444,9 +441,6 @@ function BottomBar({ page, setPage, theme, setTheme }: {
           </button>
         );
       })}
-      <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 6 }}>
-        <ThemeSwitch value={theme} onChange={setTheme} vertical={false} />
-      </div>
     </nav>
   );
 }
