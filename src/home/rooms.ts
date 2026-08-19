@@ -66,8 +66,14 @@ export const ROOM_DEVICES: Record<string, Record<string, RoomDevices>> = {
       note: "8'x8' bay — ratgdo, local control",
     },
     'Double Bay': {
-      entities: ['cover.garage_door_2'],
-      note: "16'x8' bay — still alarm.com until its board is flashed",
+      entities: [
+        'cover.garage_main_garage_stall_door',
+        'light.garage_main_garage_stall_light',
+        'lock.garage_main_garage_stall_lock_remotes',
+        'binary_sensor.garage_main_garage_stall_obstruction',
+        'binary_sensor.garage_main_garage_stall_motion',
+      ],
+      note: "16'x8' bay — ratgdo, local control",
     },
     Porch: {
       entities: ['binary_sensor.front_porch_motion'],

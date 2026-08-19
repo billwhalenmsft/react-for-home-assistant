@@ -246,8 +246,11 @@ const E = {
   blink: 'alarm_control_panel.blink_indoor',
   panel: 'alarm_control_panel.panel',
   lock: 'lock.yale_front_door_lock',
-  garage1: 'cover.garage',
-  garage2: 'cover.garage_door_2',
+  // Both bays now run local ratgdo boards. cover.garage / cover.garage_door_2 are
+  // alarm.com mirrors of these same two doors: they lag ~90 s behind reality, never
+  // report the opening/closing transitions, and disappear with the subscription.
+  garage1: 'cover.garage_main_garage_stall_door', // 16'x8' double
+  garage2: 'cover.garage_single_door',            //  8'x8' single
   doors: [
     ['Front Door', 'binary_sensor.front_door'],
     ['Dining Slider', 'binary_sensor.dining_sliding_door'],
@@ -511,8 +514,11 @@ function useAttention(hass: Hass): string[] {
 
   const items: string[] = [];
   for (const [name, id] of E.doors) if (e[id]?.state === 'on') items.push(`${name} is open`);
-  if (e[E.garage1]?.state === 'open') items.push('Garage 1 is open');
-  if (e[E.garage2]?.state === 'open') items.push('Garage 2 is open');
+  for (const [id, name] of [[E.garage1, 'Double bay'], [E.garage2, 'Single bay']] as const) {
+    const s = e[id]?.state;
+    if (!s || s === 'unavailable' || s === 'unknown') items.push(`${name} door is offline`);
+    else if (s !== 'closed') items.push(`${name} door is ${s}`);
+  }
   if (e[E.lock]?.state === 'unlocked') items.push('Front door is unlocked');
   const soil = num(e[E.soil]);
   if (soil >= 0 && soil < 20) items.push(`Grow soil critical — ${Math.round(soil)}%`);
@@ -705,10 +711,16 @@ function ClimateDial({ hass }: { hass: Hass }) {
 function SecuritySummary({ hass, onMore }: { hass: Hass; onMore?: () => void }) {
   const ids = useMemo(() => [E.lock, E.garage1, E.garage2, ...E.doors.map(([, id]) => id)], []);
   const e = useEntities(hass, ids);
+  // Anything not positively 'closed' counts - including unavailable - so a board
+  // that has dropped off WiFi can never render as "Perimeter secure".
+  const notClosed = (id: string) => {
+    const s = e[id]?.state;
+    return !!s && s !== 'closed';
+  };
   const issues =
     E.doors.filter(([, id]) => e[id]?.state === 'on').length +
-    (e[E.garage1]?.state === 'open' ? 1 : 0) +
-    (e[E.garage2]?.state === 'open' ? 1 : 0) +
+    (notClosed(E.garage1) ? 1 : 0) +
+    (notClosed(E.garage2) ? 1 : 0) +
     (e[E.lock]?.state === 'unlocked' ? 1 : 0);
   const secure = issues === 0;
 
@@ -961,19 +973,28 @@ function SecurityPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
         </div>
       </Glass>
 
-      {([[E.garage1, 'Garage 1'], [E.garage2, 'Garage 2']] as const).map(([id, name]) => {
-        const open = e[id]?.state === 'open';
+      {([[E.garage1, 'Double Bay'], [E.garage2, 'Single Bay']] as const).map(([id, name]) => {
+        const st = e[id]?.state;
+        const offline = !st || st === 'unavailable' || st === 'unknown';
+        const moving = st === 'opening' || st === 'closing';
+        const open = !offline && st !== 'closed';
         return (
           <Glass key={id}>
             <PanelHead label={name} />
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <Icon d={P.garage} size={44} color={open ? T.warn : T.dim} />
+              <Icon d={P.garage} size={44} color={offline ? T.alert : open ? T.warn : T.dim} />
               <div>
-                <div style={{ fontSize: 18, fontWeight: 300, color: open ? T.warn : T.text }}>{open ? 'Open' : 'Closed'}</div>
+                <div style={{ fontSize: 18, fontWeight: 300, color: offline ? T.alert : open ? T.warn : T.text }}>
+                  {offline ? 'Offline' : moving ? (st === 'opening' ? 'Opening...' : 'Closing...') : open ? 'Open' : 'Closed'}
+                </div>
                 <div style={{ marginTop: 10 }}>
                   <Pill tone={open ? 'gold' : 'ghost'}
-                    onClick={() => void hass.callService('cover', open ? 'close_cover' : 'open_cover', {}, { entity_id: id })}>
-                    {open ? 'Close' : 'Open'}
+                    onClick={() => void hass.callService(
+                      'cover',
+                      moving ? 'stop_cover' : open ? 'close_cover' : 'open_cover',
+                      {}, { entity_id: id },
+                    )}>
+                    {moving ? 'Stop' : open ? 'Close' : 'Open'}
                   </Pill>
                 </div>
               </div>
@@ -984,7 +1005,7 @@ function SecurityPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
 
       <Glass span={cols}>
         <PanelHead label="Perimeter" right={
-          <span style={{ fontSize: 11.5, color: T.dim }}>via Alarm.com bridge · ratgdo pending</span>
+          <span style={{ fontSize: 11.5, color: T.dim }}>contacts via Alarm.com bridge · garage via ratgdo (local)</span>
         } />
         <div style={{ display: 'grid', gap: 10, gridTemplateColumns: `repeat(${narrow ? 2 : 5}, minmax(0,1fr))` }}>
           {E.doors.map(([name, id]) => {

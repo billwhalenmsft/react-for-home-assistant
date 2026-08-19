@@ -41,7 +41,7 @@ const ROOM_ENTITY: Record<string, Record<string, string>> = {
     Entry: 'light.front_foyer_front_foyer_main_lights',
     Mud: 'light.mudroom_mudroom_main_lights',
     'Single Bay': 'cover.garage_single_door',
-    'Double Bay': 'cover.garage_door_2',
+    'Double Bay': 'cover.garage_main_garage_stall_door',
   },
   fp_upper: {
     Laundry: 'sensor.laundry_room_washer_machine_state',
@@ -60,7 +60,7 @@ const ROOM_ENTITY: Record<string, Record<string, string>> = {
 const DOORS: Record<string, Array<{ room: string; entity: string }>> = {
   fp_main: [
     { room: 'Single Bay', entity: 'cover.garage_single_door' },
-    { room: 'Double Bay', entity: 'cover.garage_door_2' },
+    { room: 'Double Bay', entity: 'cover.garage_main_garage_stall_door' },
   ],
 };
 

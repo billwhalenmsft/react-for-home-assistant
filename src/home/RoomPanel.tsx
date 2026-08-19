@@ -53,7 +53,13 @@ const GARAGE: Record<string, {
     obstruction: 'binary_sensor.garage_single_obstruction',
     openings: 'sensor.garage_single_openings',
   },
-  'Double Bay': { cover: 'cover.garage_door_2' },
+  'Double Bay': {
+    cover: 'cover.garage_main_garage_stall_door',
+    light: 'light.garage_main_garage_stall_light',
+    lock: 'lock.garage_main_garage_stall_lock_remotes',
+    obstruction: 'binary_sensor.garage_main_garage_stall_obstruction',
+    openings: 'sensor.garage_main_garage_stall_openings',
+  },
 };
 
 export function RoomPanel({
