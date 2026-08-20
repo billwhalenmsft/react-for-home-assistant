@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useEntities } from '../ha/useEntities';
 import type { Hass, HassEntity } from '../ha/types';
 import { Floorplan } from './floorplan';
@@ -595,6 +596,74 @@ function useAttention(hass: Hass): Attention[] {
 }
 
 
+
+/**
+ * Confirmation for actions that reduce security.
+ *
+ * Asymmetric on purpose. Closing a garage door or locking the front door makes
+ * the house safer, so those fire immediately - a confirmation there is pure
+ * friction on the action you most want to be one tap. Opening and unlocking are
+ * the directions you cannot take back from across town, and on a tile-sized
+ * touch target they sit one mis-tap away.
+ *
+ * Portalled for the same reason the room modal is: this renders deep inside
+ * Home Assistant's DOM, where position:fixed anchors to the nearest ancestor
+ * with a transform or filter rather than the viewport.
+ */
+type Guarded = { title: string; body: string; verb: string; run: () => void };
+
+function useGuard() {
+  const [pending, setPending] = useState<Guarded | null>(null);
+
+  useEffect(() => {
+    if (!pending) return;
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') setPending(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pending]);
+
+  const dialog = pending
+    ? createPortal(
+        <div
+          role="dialog" aria-modal="true" aria-label={pending.title}
+          onClick={(ev) => { ev.stopPropagation(); setPending(null); }}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 80, display: 'flex',
+            alignItems: 'center', justifyContent: 'center', padding: 20,
+            background: 'rgba(0,0,0,0.62)', backdropFilter: 'blur(6px)',
+            WebkitBackdropFilter: 'blur(6px)',
+          }}
+        >
+          <div
+            onClick={(ev) => ev.stopPropagation()}
+            style={{
+              width: 'min(380px, 100%)', padding: 22, borderRadius: 16,
+              background: T.ground, border: `1px solid ${T.lineHi}`,
+              boxShadow: '0 24px 60px rgba(0,0,0,0.55)', color: T.text,
+            }}
+          >
+            <div style={{ fontSize: 19, fontWeight: 500 }}>{pending.title}</div>
+            <div style={{ fontSize: 13.5, color: T.dim, marginTop: 8, lineHeight: 1.5 }}>
+              {pending.body}
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>
+              <Pill tone="ghost" onClick={() => setPending(null)}>Cancel</Pill>
+              <Pill
+                tone="gold"
+                onClick={() => { const go = pending.run; setPending(null); go(); }}
+              >
+                {pending.verb}
+              </Pill>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )
+    : null;
+
+  return { guard: setPending, dialog };
+}
+
 /* ======================================================== action feedback */
 
 /**
@@ -703,6 +772,7 @@ function ActionTile({ hass, entity, name, kind }: {
   const e = useEntities(hass, ids);
   const st = e[entity]?.state;
   const { busy, run } = useOptimistic(st);
+  const { guard, dialog } = useGuard();
 
   const offline = !st || st === 'unavailable' || st === 'unknown';
   const moving = st === 'opening' || st === 'closing';
@@ -714,15 +784,30 @@ function ActionTile({ hass, entity, name, kind }: {
   const act = () => {
     if (offline || busy) return;
     if (kind === 'lock') {
-      run(secure ? 'unlocked' : 'locked',
+      const fire = () => run(secure ? 'unlocked' : 'locked',
         () => void hass.callService('lock', secure ? 'unlock' : 'lock', {}, { entity_id: entity }));
+      if (!secure) { fire(); return; }        // locking is the safe direction
+      guard({
+        title: `Unlock ${name}?`,
+        body: 'This releases the deadbolt. Anyone at the door can walk in until it is locked again.',
+        verb: 'Unlock',
+        run: fire,
+      });
     } else {
-      run(secure ? 'open' : 'closed',
+      const fire = () => run(secure ? 'open' : 'closed',
         () => void hass.callService('cover', secure ? 'open_cover' : 'close_cover', {}, { entity_id: entity }));
+      if (!secure) { fire(); return; }        // closing is the safe direction
+      guard({
+        title: `Open ${name}?`,
+        body: 'This opens the garage door and leaves it open until something closes it.',
+        verb: 'Open',
+        run: fire,
+      });
     }
   };
 
   return (
+    <>
     <button
       type="button" onClick={act} disabled={offline || busy}
       aria-label={name + ' - ' + label} className="est-lift"
@@ -744,6 +829,8 @@ function ActionTile({ hass, entity, name, kind }: {
       </div>
       <BusyBar show={active} />
     </button>
+    {dialog}
+    </>
   );
 }
 
@@ -753,6 +840,7 @@ function FrontDoorCard({ hass }: { hass: Hass }) {
   const e = useEntities(hass, ids);
   const st = e[E.lock]?.state;
   const { busy, run } = useOptimistic(st);
+  const { guard, dialog } = useGuard();
 
   const offline = !st || st === 'unavailable' || st === 'unknown';
   const locked = st === 'locked';
@@ -776,8 +864,15 @@ function FrontDoorCard({ hass }: { hass: Hass }) {
               tone={locked ? 'ghost' : 'gold'}
               onClick={() => {
                 if (offline || busy) return;
-                run(locked ? 'unlocked' : 'locked',
+                const fire = () => run(locked ? 'unlocked' : 'locked',
                   () => void hass.callService('lock', locked ? 'unlock' : 'lock', {}, { entity_id: E.lock }));
+                if (!locked) { fire(); return; }
+                guard({
+                  title: 'Unlock the front door?',
+                  body: 'This releases the deadbolt. Anyone at the door can walk in until it is locked again.',
+                  verb: 'Unlock',
+                  run: fire,
+                });
               }}
             >
               {busy ? 'Working...' : locked ? 'Unlock' : 'Lock now'}
@@ -786,6 +881,7 @@ function FrontDoorCard({ hass }: { hass: Hass }) {
           <BusyBar show={busy} />
         </div>
       </div>
+      {dialog}
     </Glass>
   );
 }
@@ -796,6 +892,7 @@ function GarageCard({ hass, entity, name }: { hass: Hass; entity: string; name: 
   const e = useEntities(hass, ids);
   const st = e[entity]?.state;
   const { busy, run } = useOptimistic(st);
+  const { guard, dialog } = useGuard();
 
   const offline = !st || st === 'unavailable' || st === 'unknown';
   const moving = st === 'opening' || st === 'closing';
@@ -808,8 +905,15 @@ function GarageCard({ hass, entity, name }: { hass: Hass; entity: string; name: 
   const act = () => {
     if (offline || busy) return;
     if (moving) { void hass.callService('cover', 'stop_cover', {}, { entity_id: entity }); return; }
-    run(open ? 'closed' : 'open',
+    const fire = () => run(open ? 'closed' : 'open',
       () => void hass.callService('cover', open ? 'close_cover' : 'open_cover', {}, { entity_id: entity }));
+    if (open) { fire(); return; }             // closing is the safe direction
+    guard({
+      title: `Open the ${name.toLowerCase()}?`,
+      body: 'This opens the garage door and leaves it open until something closes it.',
+      verb: 'Open',
+      run: fire,
+    });
   };
 
   return (
@@ -831,6 +935,7 @@ function GarageCard({ hass, entity, name }: { hass: Hass; entity: string; name: 
           <BusyBar show={active} />
         </div>
       </div>
+      {dialog}
     </Glass>
   );
 }
@@ -887,10 +992,6 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
 
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
-      <Glass span={cols} style={{ padding: '14px 16px 8px' }}>
-        <SkyBanner hass={hass} compact={narrow} />
-      </Glass>
-
       <Glass span={cols} style={{ padding: '16px 18px' }}>
         <PanelHead label="Favorites" />
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: `repeat(${narrow ? 1 : 3}, minmax(0,1fr))` }}>
