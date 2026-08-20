@@ -6,6 +6,7 @@ import { RoomsGrid } from './RoomsGrid';
 import { THEME_CSS } from './theme';
 import { HousePulse, ForecastStrip } from './pulse';
 import { IssMap, type IssState } from './skymap';
+import { SunArc, ambientWash } from './celestial';
 
 /**
  * WHALEN ESTATE — a Savant/Control4-class surface for Home Assistant.
@@ -244,6 +245,7 @@ const titleize = (s?: string) => (s ?? '—').replace(/_/g, ' ').replace(/\b\w/g
 const E = {
   headline: 'sensor.house_headline',
   weather: 'weather.forecast_home',
+  sun: 'sun.sun',
   person: 'device_tracker.bills_iphone_17',
   phoneBatt: 'sensor.iphone_battery_level',
   blink: 'alarm_control_panel.blink_indoor',
@@ -372,11 +374,14 @@ export function EstateApp({ hass }: { hass: Hass }) {
       <style>{THEME_CSS}</style>
       <style>{GLOBAL_CSS}</style>
 
+      <AmbientLayer hass={hass} />
+
       {!narrow && <Rail page={page} setPage={setPage} />}
 
       <main style={{
         flex: 1, minWidth: 0, padding: narrow ? '20px 16px 96px' : '30px 38px 48px',
         maxWidth: 1520, margin: '0 auto', width: '100%', boxSizing: 'border-box',
+        position: 'relative', zIndex: 1,
       }}>
         <Masthead hass={hass} narrow={narrow} />
         <div key={page} className="est-page" style={{ marginTop: 26 }}>
@@ -826,6 +831,50 @@ function GarageCard({ hass, entity, name }: { hass: Hass; entity: string; name: 
   );
 }
 
+
+/**
+ * A page-wide wash that tracks the real sun.
+ *
+ * Its own tiny subscription on purpose: elevation changes continuously, and
+ * hanging it off the shell would re-render every page on every tick. This
+ * component owns two entities and paints one div.
+ */
+function AmbientLayer({ hass }: { hass: Hass }) {
+  const ids = useMemo(() => [E.sun, E.weather], []);
+  const e = useEntities(hass, ids);
+  const elevation = (attr(e[E.sun], 'elevation') as number | undefined) ?? 0;
+  const clouds = (attr(e[E.weather], 'cloud_coverage') as number | undefined) ?? 0;
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0,
+        background: ambientWash(elevation, clouds),
+        transition: 'background 4s linear',
+      }}
+    />
+  );
+}
+
+/** The sun's real position today, as a banner. */
+function SkyBanner({ hass, compact }: { hass: Hass; compact?: boolean }) {
+  const ids = useMemo(() => [E.sun, E.moon, E.homeZone], []);
+  const e = useEntities(hass, ids);
+  const sun = e[E.sun];
+  return (
+    <SunArc
+      lat={(attr(e[E.homeZone], 'latitude') as number | undefined) ?? 44.72}
+      solarNoonIso={attr(sun, 'next_noon') as string | undefined}
+      sunriseIso={attr(sun, 'next_rising') as string | undefined}
+      sunsetIso={attr(sun, 'next_setting') as string | undefined}
+      elevation={(attr(sun, 'elevation') as number | undefined) ?? 0}
+      azimuth={(attr(sun, 'azimuth') as number | undefined) ?? 180}
+      moonPhase={e[E.moon]?.state}
+      compact={compact}
+    />
+  );
+}
+
 /* ================================================================= home */
 
 function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: Page) => void }) {
@@ -834,6 +883,10 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
 
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+      <Glass span={cols} style={{ padding: '14px 16px 8px' }}>
+        <SkyBanner hass={hass} compact={narrow} />
+      </Glass>
+
       <Glass span={cols} style={{ padding: '16px 18px' }}>
         <PanelHead label="Favorites" />
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: `repeat(${narrow ? 1 : 3}, minmax(0,1fr))` }}>
@@ -1510,6 +1563,11 @@ function SkyPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
         <div style={{ fontSize: 13.5, color: T.dim, marginTop: 8 }}>
           {activeShower(now)} · {e[E.auroraVerdict]?.state ?? 'space weather loading'}
         </div>
+      </Glass>
+
+      <Glass span={cols} style={{ padding: '14px 16px 8px' }}>
+        <PanelHead label="The sky right now" />
+        <SkyBanner hass={hass} />
       </Glass>
 
       {/* ---------------------------------------------------- the map */}
