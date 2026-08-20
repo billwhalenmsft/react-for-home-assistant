@@ -5,6 +5,7 @@ import { Floorplan } from './floorplan';
 import { RoomsGrid } from './RoomsGrid';
 import { THEME_CSS } from './theme';
 import { HousePulse, ForecastStrip } from './pulse';
+import { IssMap, type IssState } from './skymap';
 
 /**
  * WHALEN ESTATE — a Savant/Control4-class surface for Home Assistant.
@@ -260,6 +261,16 @@ const E = {
     ['Garage Entry', 'binary_sensor.garage_entry_door'],
   ] as const,
   motion: 'binary_sensor.lower_motion_motion',
+  // --- sky lab (packages/sky_lab.yaml) ---------------------------------
+  homeZone: 'zone.home',
+  issPos: 'sensor.iss_position',
+  issPassSummary: 'sensor.iss_pass_summary',
+  issPassDir: 'sensor.iss_pass_direction',
+  kp: 'sensor.planetary_k_index',
+  apod: 'sensor.nasa_picture_of_the_day',
+  auroraVerdict: 'sensor.aurora_verdict',
+  laundryWasherFlag: 'input_boolean.washer_needs_unloading',
+  laundryDryerFlag: 'input_boolean.dryer_needs_unloading',
   climate: 'climate.family_room',
   allLights: 'light.main_floor_all_lights',
   rooms: [
@@ -507,31 +518,73 @@ function Masthead({ hass, narrow }: { hass: Hass; narrow: boolean }) {
 
 /* ============================================================== attention */
 
-function useAttention(hass: Hass): string[] {
+/**
+ * One item on the Needs-attention board.
+ *
+ * `onClear` is what makes this more than a read-out: some problems are facts
+ * about the house that resolve themselves (a door gets shut), and some are
+ * chores that stay true until a person does something. The second kind needs
+ * a human to say "handled", and the board has to let them say it.
+ */
+type Attention = {
+  text: string;
+  tone: 'alert' | 'warn' | 'info';
+  onClear?: () => void;
+};
+
+const TONE_RANK: Record<Attention['tone'], number> = { alert: 0, warn: 1, info: 2 };
+
+function useAttention(hass: Hass): Attention[] {
   const ids = useMemo(() => [
     E.lock, E.garage1, E.garage2, E.soil, E.water, E.washer, E.dryer, E.waste,
+    E.laundryWasherFlag, E.laundryDryerFlag,
     ...E.doors.map(([, id]) => id), ...E.growOnline,
   ], []);
   const e = useEntities(hass, ids);
 
-  const items: string[] = [];
-  for (const [name, id] of E.doors) if (e[id]?.state === 'on') items.push(`${name} is open`);
+  const items: Attention[] = [];
+  const add = (text: string, tone: Attention['tone'], onClear?: () => void) =>
+    items.push({ text, tone, onClear });
+
+  // --- security: anything that leaves the house open ----------------------
+  for (const [name, id] of E.doors) {
+    if (e[id]?.state === 'on') add(`${name} is open`, 'warn');
+  }
   for (const [id, name] of [[E.garage1, 'Double bay'], [E.garage2, 'Single bay']] as const) {
     const s = e[id]?.state;
-    if (!s || s === 'unavailable' || s === 'unknown') items.push(`${name} door is offline`);
-    else if (s !== 'closed') items.push(`${name} door is ${s}`);
+    if (!s || s === 'unavailable' || s === 'unknown') add(`${name} door is offline`, 'alert');
+    else if (s !== 'closed') add(`${name} door is ${s}`, 'warn');
   }
-  if (e[E.lock]?.state === 'unlocked') items.push('Front door is unlocked');
+  if (e[E.lock]?.state === 'unlocked') add('Front door is unlocked', 'alert');
+
+  // --- grow: the tent has no slack, so these outrank housekeeping ---------
   const soil = num(e[E.soil]);
-  if (soil >= 0 && soil < 20) items.push(`Grow soil critical — ${Math.round(soil)}%`);
+  if (soil >= 0 && soil < 20) add(`Grow soil critical - ${Math.round(soil)}%`, 'alert');
   const water = num(e[E.water]);
-  if (water >= 0 && water < 25) items.push(`Humidifier reservoir ${Math.round(water)}%`);
+  if (water >= 0 && water < 25) add(`Humidifier reservoir ${Math.round(water)}%`, 'warn');
   const offline = E.growOnline.filter((id) => e[id] && e[id].state !== 'on').length;
-  if (offline > 0) items.push(`${offline} grow device${offline > 1 ? 's' : ''} offline`);
-  if (e[E.washer]?.state === 'run') items.push('Washer running');
-  if (e[E.dryer]?.state === 'run') items.push('Dryer running');
-  return items;
+  if (offline > 0) add(`${offline} grow device${offline > 1 ? 's' : ''} offline`, 'alert');
+
+  // --- laundry: standing chores, cleared by a person ----------------------
+  // These persist after the machine goes idle, which is the whole point: the
+  // old version dropped them exactly when someone needed to go empty it.
+  for (const [flag, appliance, label] of [
+    [E.laundryWasherFlag, 'washer', 'Washer needs unloading'],
+    [E.laundryDryerFlag, 'dryer', 'Dryer needs unloading'],
+  ] as const) {
+    if (e[flag]?.state !== 'on') continue;
+    add(label, 'warn', () => {
+      void hass.callService('script', 'laundry_acknowledge', { appliance, who: 'Someone' });
+    });
+  }
+
+  // --- purely informational ----------------------------------------------
+  if (e[E.washer]?.state === 'run') add('Washer running', 'info');
+  if (e[E.dryer]?.state === 'run') add('Dryer running', 'info');
+
+  return items.sort((a, b) => TONE_RANK[a.tone] - TONE_RANK[b.tone]);
 }
+
 
 /* ======================================================== action feedback */
 
@@ -805,12 +858,28 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
         <Glass span={cols} style={{ borderColor: 'rgba(224,179,76,0.35)', background: 'rgba(224,179,76,0.06)' }}>
           <PanelHead label="Needs attention" />
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 9 }}>
-            {attention.map((a) => (
-              <span key={a} style={{
+            {attention.map((a) => {
+              const colour = a.tone === 'alert' ? T.alert : a.tone === 'warn' ? T.warn : T.dim;
+              const chip: CSSProperties = {
+                display: 'inline-flex', alignItems: 'center', gap: 8,
                 padding: '7px 14px', borderRadius: 999, fontSize: 12.5, fontWeight: 500,
-                border: `1px solid rgba(224,179,76,0.4)`, color: T.warn,
-              }}>{a}</span>
-            ))}
+                border: '1px solid ' + colour, color: colour, background: 'transparent',
+              };
+              // A chore is a button; a fact is not. Only offer the tap where
+              // tapping actually does something.
+              return a.onClear ? (
+                <button
+                  key={a.text} type="button" className="est-lift"
+                  onClick={a.onClear} aria-label={a.text + ' - mark done'}
+                  style={{ ...chip, cursor: 'pointer' }}
+                >
+                  {a.text}
+                  <span aria-hidden="true" style={{ fontSize: 11, opacity: 0.75 }}>&#10003; done</span>
+                </button>
+              ) : (
+                <span key={a.text} style={chip}>{a.text}</span>
+              );
+            })}
           </div>
         </Glass>
       )}
@@ -1382,31 +1451,112 @@ function activeShower(d: Date): string {
 }
 
 function SkyPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
-  const now = useNow(60000);
-  const ids = useMemo(() => [E.weather, E.moon, E.moonEmoji, E.aurora], []);
+  const now = useNow(30000);
+  const ids = useMemo(() => [
+    E.weather, E.moon, E.moonEmoji, E.aurora, E.homeZone,
+    E.issPos, E.issPassSummary, E.issPassDir, E.kp, E.apod, E.auroraVerdict,
+  ], []);
   const e = useEntities(hass, ids);
+
   const clouds = (attr(e[E.weather], 'cloud_coverage') as number | undefined) ?? 100;
-  const aurora = num(e[E.aurora], 0);
-  const moonOk = ['new_moon', 'waxing_crescent', 'waning_crescent', 'first_quarter', 'last_quarter'].includes(e[E.moon]?.state ?? '');
+  const moonOk = ['new_moon', 'waxing_crescent', 'waning_crescent', 'first_quarter', 'last_quarter']
+    .includes(e[E.moon]?.state ?? '');
   const go = clouds < 30 && moonOk;
   const cols = narrow ? 1 : 3;
+
+  // Kp is the honest aurora number; the NOAA "visibility %" sensor is a
+  // derived convenience and disagrees with it often enough to be confusing.
+  const kp = num(e[E.kp], -1);
+  const kpStrong = kp >= 5;
+
+  const issEnt = e[E.issPos];
+  const iss: IssState | null = issEnt && typeof attr(issEnt, 'latitude') === 'number'
+    ? {
+        latitude: attr(issEnt, 'latitude') as number,
+        longitude: attr(issEnt, 'longitude') as number,
+        altitude: attr(issEnt, 'altitude') as number | undefined,
+        velocity: attr(issEnt, 'velocity') as number | undefined,
+        visibility: attr(issEnt, 'visibility') as string | undefined,
+        solar_lat: attr(issEnt, 'solar_lat') as number | undefined,
+        solar_lon: attr(issEnt, 'solar_lon') as number | undefined,
+        footprint: attr(issEnt, 'footprint') as number | undefined,
+      }
+    : null;
+
+  const homeLat = (attr(e[E.homeZone], 'latitude') as number | undefined) ?? 44.72;
+  const homeLon = (attr(e[E.homeZone], 'longitude') as number | undefined) ?? -93.38;
+
+  const apod = e[E.apod];
+  const apodUrl = attr(apod, 'url') as string | undefined;
+  const apodIsImage = (attr(apod, 'media_type') as string | undefined) !== 'video';
 
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
       <Glass span={cols} style={{
-        textAlign: 'center', padding: '44px 24px',
-        background: go
-          ? 'linear-gradient(180deg, rgba(122,196,143,0.10), rgba(255,255,255,0.02))'
-          : 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))',
-        borderColor: go ? 'rgba(122,196,143,0.35)' : T.line,
+        textAlign: 'center', padding: '40px 24px',
+        background: kpStrong
+          ? 'linear-gradient(180deg, rgba(122,160,224,0.16), rgba(255,255,255,0.02))'
+          : go
+            ? 'linear-gradient(180deg, rgba(122,196,143,0.10), rgba(255,255,255,0.02))'
+            : 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))',
+        borderColor: kpStrong ? 'rgba(122,160,224,0.45)' : go ? 'rgba(122,196,143,0.35)' : T.line,
       }}>
-        <div style={{ fontSize: 64, marginBottom: 6 }} aria-hidden="true">{e[E.moonEmoji]?.state ?? '🌙'}</div>
-        <div style={{ fontSize: 34, fontWeight: 200, color: go ? T.ok : clouds < 60 ? T.warn : T.dim }}>
-          {go ? 'GO for the telescope' : clouds < 60 ? 'Marginal night' : 'Clouded out'}
+        <div style={{ fontSize: 60, marginBottom: 4 }} aria-hidden="true">
+          {kpStrong ? '🌌' : (e[E.moonEmoji]?.state ?? '🌙')}
         </div>
-        <div style={{ fontSize: 14, color: T.dim, marginTop: 8 }}>
-          {activeShower(now)} · best viewing after astronomical dusk, away from the porch lights
+        <div style={{ fontSize: 32, fontWeight: 200, color: kpStrong ? T.info : go ? T.ok : clouds < 60 ? T.warn : T.dim }}>
+          {kpStrong ? 'AURORA WATCH' : go ? 'GO for the telescope' : clouds < 60 ? 'Marginal night' : 'Clouded out'}
         </div>
+        <div style={{ fontSize: 13.5, color: T.dim, marginTop: 8 }}>
+          {activeShower(now)} · {e[E.auroraVerdict]?.state ?? 'space weather loading'}
+        </div>
+      </Glass>
+
+      {/* ---------------------------------------------------- the map */}
+      <Glass span={cols} style={{ padding: 16 }}>
+        <PanelHead
+          label="ISS · live ground track"
+          right={
+            <span style={{ fontSize: 11.5, color: T.dim }}>
+              {iss
+                ? `${Math.round(iss.altitude ?? 0)} km · ${Math.round(iss.velocity ?? 0).toLocaleString()} km/h · ${iss.visibility === 'daylight' ? 'in sunlight' : 'in shadow'}`
+                : 'awaiting telemetry'}
+            </span>
+          }
+        />
+        <IssMap iss={iss} homeLat={homeLat} homeLon={homeLon} />
+        <div style={{ fontSize: 11, color: T.faint, marginTop: 8 }}>
+          Shaded band is real night, solved from the sub-solar point. The ring is the
+          station's horizon — when it overlaps Home and the sky here is dark, it is overhead.
+        </div>
+      </Glass>
+
+      {/* ------------------------------------------------- next pass */}
+      <Glass>
+        <PanelHead label="Next visible pass" />
+        <div style={{ fontSize: 21, fontWeight: 300 }}>{e[E.issPassSummary]?.state ?? '—'}</div>
+        <div style={{ fontSize: 12.5, color: T.dim, marginTop: 6 }}>{e[E.issPassDir]?.state ?? '—'}</div>
+        <div style={{ fontSize: 11, color: T.faint, marginTop: 8 }}>
+          Above 40° and after dark is worth walking outside for.
+        </div>
+      </Glass>
+
+      {/* ------------------------------------------------ space weather */}
+      <Glass style={{ textAlign: 'center' }}>
+        <PanelHead label="Planetary Kp" />
+        <div style={{ fontSize: 46, fontWeight: 200, color: kp >= 5 ? T.info : kp >= 4 ? T.warn : T.text }}>
+          {kp < 0 ? '—' : kp.toFixed(1)}
+        </div>
+        <div style={{
+          height: 6, borderRadius: 3, marginTop: 10, overflow: 'hidden',
+          background: 'rgba(255,255,255,0.10)',
+        }}>
+          <div style={{
+            width: `${Math.max(0, Math.min(kp, 9)) / 9 * 100}%`, height: '100%',
+            background: kp >= 5 ? T.info : kp >= 4 ? T.warn : T.ok,
+          }} />
+        </div>
+        <div style={{ fontSize: 11, color: T.dim, marginTop: 6 }}>Kp 5+ reaches Minnesota</div>
       </Glass>
 
       <Glass style={{ textAlign: 'center' }}>
@@ -1417,16 +1567,41 @@ function SkyPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
 
       <Glass style={{ textAlign: 'center' }}>
         <PanelHead label="Moon" />
-        <div style={{ fontSize: 24, fontWeight: 300 }}>{titleize(e[E.moon]?.state)}</div>
+        <div style={{ fontSize: 42, marginBottom: 2 }} aria-hidden="true">{e[E.moonEmoji]?.state ?? ''}</div>
+        <div style={{ fontSize: 19, fontWeight: 300 }}>{titleize(e[E.moon]?.state)}</div>
         <div style={{ fontSize: 11.5, color: moonOk ? T.ok : T.warn, marginTop: 4 }}>
           {moonOk ? 'Dark enough for deep-sky' : 'Bright — planets & doubles only'}
         </div>
       </Glass>
 
-      <Glass style={{ textAlign: 'center' }}>
-        <PanelHead label="Aurora index" />
-        <div style={{ fontSize: 46, fontWeight: 200, color: aurora >= 30 ? T.info : T.text }}>{Math.round(aurora)}%</div>
-        <div style={{ fontSize: 11.5, color: T.dim, marginTop: 4 }}>NOAA visibility for this latitude</div>
+      {/* ------------------------------------------------------ APOD */}
+      <Glass span={narrow ? 1 : 2} style={{ padding: 16 }}>
+        <PanelHead
+          label="NASA · picture of the day"
+          right={<span style={{ fontSize: 11.5, color: T.dim }}>{(attr(apod, 'date') as string) ?? ''}</span>}
+        />
+        {apodUrl && apodIsImage ? (
+          <img
+            src={apodUrl}
+            alt={apod?.state ?? 'NASA astronomy picture of the day'}
+            loading="lazy"
+            style={{ width: '100%', borderRadius: 10, display: 'block', maxHeight: 360, objectFit: 'cover' }}
+          />
+        ) : (
+          <div style={{ fontSize: 12.5, color: T.dim, padding: '18px 0' }}>
+            {apodUrl ? "Today's entry is a video — open it on apod.nasa.gov." : 'Waiting for NASA.'}
+          </div>
+        )}
+        <div style={{ fontSize: 15, fontWeight: 500, marginTop: 10 }}>{apod?.state ?? ''}</div>
+        <div style={{ fontSize: 12, color: T.dim, marginTop: 6, lineHeight: 1.5 }}>
+          {((attr(apod, 'explanation') as string) ?? '').slice(0, 320)}
+          {((attr(apod, 'explanation') as string) ?? '').length > 320 ? '…' : ''}
+        </div>
+        {attr(apod, 'copyright') ? (
+          <div style={{ fontSize: 10.5, color: T.faint, marginTop: 6 }}>
+            © {String(attr(apod, 'copyright')).trim()}
+          </div>
+        ) : null}
       </Glass>
     </div>
   );
