@@ -245,7 +245,7 @@ const E = {
   phoneBatt: 'sensor.iphone_battery_level',
   blink: 'alarm_control_panel.blink_indoor',
   panel: 'alarm_control_panel.panel',
-  lock: 'lock.yale_front_door_lock',
+  lock: 'lock.yale_front_door',
   // Both bays now run local ratgdo boards. cover.garage / cover.garage_door_2 are
   // alarm.com mirrors of these same two doors: they lag ~90 s behind reality, never
   // report the opening/closing transitions, and disappear with the subscription.

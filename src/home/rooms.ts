@@ -48,7 +48,7 @@ export const ROOM_DEVICES: Record<string, Record<string, RoomDevices>> = {
     Entry: {
       entities: [
         'light.front_foyer_front_foyer_main_lights',
-        'lock.yale_front_door_lock',
+        'lock.yale_front_door',
         'binary_sensor.front_door',
       ],
     },
