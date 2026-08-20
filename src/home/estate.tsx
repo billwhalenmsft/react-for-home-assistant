@@ -1310,7 +1310,41 @@ function RoomsPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   // Was a flat list of every fixture in the house. Rooms are now browsed
   // room-first — pick the room, then what's in it — which is how this kind of
   // system is meant to read. See RoomsGrid.
-  return <RoomsGrid hass={hass} narrow={narrow} />;
+  return (
+    <div style={{ display: 'grid', gap: 18 }}>
+      {/* The grid below is a set of separate boxes, which is exactly what it
+          cannot show: that the kitchen, great room and dining are one
+          connected space. The panorama says that in a single glance. */}
+      <div
+        style={{
+          position: 'relative', borderRadius: T.radius, overflow: 'hidden',
+          border: `1px solid ${T.line}`, lineHeight: 0,
+        }}
+      >
+        <img
+          src="/local/yard/pano_main_floor.jpg"
+          alt="The main floor, kitchen through great room to dining"
+          loading="lazy"
+          style={{ width: '100%', display: 'block', objectFit: 'cover',
+                   maxHeight: narrow ? 150 : 260 }}
+        />
+        <div
+          style={{
+            position: 'absolute', inset: 0, pointerEvents: 'none',
+            background: 'linear-gradient(90deg, rgba(0,0,0,0.55), rgba(0,0,0,0) 32%, rgba(0,0,0,0) 70%, rgba(0,0,0,0.45))',
+          }}
+        />
+        <div style={{ position: 'absolute', left: 18, bottom: 14, pointerEvents: 'none' }}>
+          <div style={{ ...LABEL, color: 'rgba(255,255,255,0.72)' }}>The main floor</div>
+          <div style={{ fontSize: 15, fontWeight: 300, color: '#fff', marginTop: 2 }}>
+            Kitchen → Great Room → Dining
+          </div>
+        </div>
+      </div>
+
+      <RoomsGrid hass={hass} narrow={narrow} />
+    </div>
+  );
 }
 
 function PeoplePage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
