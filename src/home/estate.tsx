@@ -274,6 +274,15 @@ const E = {
   kp: 'sensor.planetary_k_index',
   apod: 'sensor.nasa_picture_of_the_day',
   auroraVerdict: 'sensor.aurora_verdict',
+  nextLaunch: 'sensor.next_launch',
+  nextLaunchName: 'sensor.next_launch_name',
+  nextLaunchDetail: 'sensor.next_launch_detail',
+  nextLaunchCountdown: 'sensor.next_launch_countdown',
+  nextSpacex: 'sensor.next_spacex_launch',
+  nextSpacexMission: 'sensor.next_spacex_mission',
+  nextSpacexCountdown: 'sensor.next_spacex_countdown',
+  epicImage: 'sensor.nasa_earth_image',
+  epicWhen: 'sensor.nasa_earth_captured',
   laundryWasherFlag: 'input_boolean.washer_needs_unloading',
   laundryDryerFlag: 'input_boolean.dryer_needs_unloading',
   climate: 'climate.family_room',
@@ -1658,6 +1667,9 @@ function SkyPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const ids = useMemo(() => [
     E.weather, E.moon, E.moonEmoji, E.aurora, E.homeZone,
     E.issPos, E.issPassSummary, E.issPassDir, E.kp, E.apod, E.auroraVerdict,
+    E.nextLaunch, E.nextLaunchName, E.nextLaunchDetail, E.nextLaunchCountdown,
+    E.nextSpacex, E.nextSpacexMission, E.nextSpacexCountdown,
+    E.epicImage, E.epicWhen,
   ], []);
   const e = useEntities(hass, ids);
 
@@ -1779,6 +1791,66 @@ function SkyPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
         <div style={{ fontSize: 19, fontWeight: 300 }}>{titleize(e[E.moon]?.state)}</div>
         <div style={{ fontSize: 11.5, color: moonOk ? T.ok : T.warn, marginTop: 4 }}>
           {moonOk ? 'Dark enough for deep-sky' : 'Bright — planets & doubles only'}
+        </div>
+      </Glass>
+
+      {/* ------------------------------------------------ launches */}
+      <Glass span={narrow ? 1 : 2}>
+        <PanelHead
+          label="Launch window"
+          right={<span style={{ fontSize: 11.5, color: T.dim }}>worldwide, next up</span>}
+        />
+        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: narrow ? '1fr' : '1fr 1fr' }}>
+          {([
+            [E.nextLaunchCountdown, E.nextLaunchName, E.nextLaunchDetail, 'Next off the pad'],
+            [E.nextSpacexCountdown, E.nextSpacexMission, null, 'Next SpaceX'],
+          ] as const).map(([cd, name, detail, label]) => {
+            const clock = e[cd]?.state ?? '—';
+            const soon = /T-\d+ min|lifting off|in flight/.test(clock);
+            return (
+              <div key={label} style={{
+                padding: '14px 16px', borderRadius: 12,
+                border: `1px solid ${soon ? T.goldDeep : T.line}`,
+                background: soon ? 'rgba(224,179,76,0.07)' : 'rgba(255,255,255,0.04)',
+              }}>
+                <div style={LABEL}>{label}</div>
+                <div style={{
+                  fontSize: 27, fontWeight: 200, marginTop: 6,
+                  color: soon ? T.gold : T.text, fontVariantNumeric: 'tabular-nums',
+                }}>
+                  {clock}
+                </div>
+                <div style={{ fontSize: 13, marginTop: 6, lineHeight: 1.4 }}>{e[name]?.state ?? '—'}</div>
+                {detail ? (
+                  <div style={{ fontSize: 11.5, color: T.dim, marginTop: 4 }}>{e[detail]?.state ?? ''}</div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ fontSize: 11, color: T.faint, marginTop: 10 }}>
+          One push fires 15 minutes before the next launch — not for all ~360 on the board.
+        </div>
+      </Glass>
+
+      {/* --------------------------------------------- EPIC full disc */}
+      <Glass style={{ padding: 16 }}>
+        <PanelHead
+          label="Earth, from a million miles"
+          right={<span style={{ fontSize: 11, color: T.dim }}>{(e[E.epicWhen]?.state ?? '').slice(0, 10)}</span>}
+        />
+        {e[E.epicImage]?.state?.startsWith('http') ? (
+          <img
+            src={e[E.epicImage].state}
+            alt="NASA EPIC full-disc image of Earth from the DSCOVR satellite"
+            loading="lazy"
+            style={{ width: '100%', borderRadius: 10, display: 'block', background: '#000' }}
+          />
+        ) : (
+          <div style={{ fontSize: 12.5, color: T.dim, padding: '18px 0' }}>Waiting for DSCOVR.</div>
+        )}
+        <div style={{ fontSize: 11, color: T.faint, marginTop: 8 }}>
+          DSCOVR sits at L1 and photographs the entire sunlit face of the planet once a day.
         </div>
       </Glass>
 
