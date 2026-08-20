@@ -1,4 +1,5 @@
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { useEntities } from '../ha/useEntities';
 import type { Hass } from '../ha/types';
 import { FLOORS, MATERIAL_COLORS, type PlanRoom } from './plan.generated';
@@ -109,13 +110,72 @@ export function RoomsGrid({ hass, narrow }: { hass: Hass; narrow: boolean }) {
       </div>
 
       {open ? (
-        <div style={S.modalWrap} onClick={() => setOpen(null)}>
-          <div style={S.modalInner} onClick={(e) => e.stopPropagation()}>
-            <RoomPanel hass={hass} floor={open.floor} room={open.room} onClose={() => setOpen(null)} variant="inline" />
-          </div>
-        </div>
+        <RoomModal narrow={narrow} onClose={() => setOpen(null)}>
+          <RoomPanel hass={hass} floor={open.floor} room={open.room} onClose={() => setOpen(null)} variant="inline" />
+        </RoomModal>
       ) : null}
     </>
+  );
+}
+
+
+/**
+ * Room detail modal.
+ *
+ * Portalled to document.body on purpose. This whole surface is a Lovelace
+ * card, so it renders deep inside Home Assistant's DOM - and `position: fixed`
+ * is measured against the nearest ancestor carrying a transform, filter or
+ * containment, not the viewport. Any such ancestor (ours or HA's) silently
+ * re-anchors the overlay, which is how a "fixed" panel ends up parked at the
+ * middle of the page instead of in front of the person who tapped. A portal
+ * sidesteps every one of them.
+ *
+ * On phones it rises from the bottom edge rather than centring: that is where
+ * a thumb already is, and it cannot land off-screen no matter the scroll
+ * position. Height is capped in dvh so mobile browser chrome cannot clip it.
+ */
+function RoomModal({ narrow, onClose, children }: {
+  narrow: boolean; onClose: () => void; children: React.ReactNode;
+}) {
+  // Escape closes, and the page behind must not scroll while this is up.
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      style={{
+        ...S.modalWrap,
+        alignItems: narrow ? 'flex-end' : 'center',
+        padding: narrow ? 0 : 20,
+      }}
+    >
+      <div
+        className="est-sheet"
+        onClick={(ev) => ev.stopPropagation()}
+        style={{
+          ...S.modalInner,
+          width: narrow ? '100%' : 'min(420px, 100%)',
+          maxHeight: narrow ? '85dvh' : '90dvh',
+          overflowY: 'auto',
+          paddingBottom: narrow ? 'env(safe-area-inset-bottom, 0px)' : undefined,
+        }}
+      >
+        {narrow ? <div aria-hidden="true" style={S.grabber} /> : null}
+        {children}
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -211,12 +271,16 @@ const S: Record<string, CSSProperties> = {
     position: 'fixed',
     inset: 0,
     zIndex: 60,
-    display: 'grid',
-    placeItems: 'center',
+    display: 'flex',
+    justifyContent: 'center',
     padding: 20,
     background: 'rgba(0,0,0,0.62)',
     backdropFilter: 'blur(6px)',
     WebkitBackdropFilter: 'blur(6px)',
   },
   modalInner: { position: 'relative', width: 'min(420px, 100%)', minHeight: 260 },
+  grabber: {
+    width: 38, height: 4, borderRadius: 999, margin: '8px auto 2px',
+    background: 'var(--wt-lineHi)', flex: 'none',
+  },
 };

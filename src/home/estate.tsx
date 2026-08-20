@@ -91,12 +91,14 @@ const GLOBAL_CSS = `
 }
 @keyframes estFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes estBreathe { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+@keyframes estSweep { 0% { background-position: -150% 0; } 100% { background-position: 250% 0; } }
 .est-page { animation: estFadeUp .45s cubic-bezier(.2,.7,.3,1) both; }
 .est-panel { transition: border-color .25s ease, transform .25s ease, background .25s ease; }
 .est-panel:hover { border-color: ${T.lineHi}; }
 .est-lift { transition: transform .2s ease, border-color .2s ease, background .2s ease; }
 .est-lift:hover { transform: translateY(-2px); }
 .est-pulse { animation: estBreathe 2.6s ease-in-out infinite; }
+.est-working { background-image: linear-gradient(90deg, transparent, ${T.gold}, transparent); background-size: 55% 100%; background-repeat: no-repeat; animation: estSweep 1.1s linear infinite; }
 .est-range { -webkit-appearance: none; appearance: none; height: 34px; background: transparent; width: 100%; cursor: pointer; }
 .est-range::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(90deg, ${T.gold} var(--fill,50%), rgba(255,255,255,0.12) var(--fill,50%)); }
 .est-range::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: ${T.goldHi}; border: 2px solid #2a251c; margin-top: -7px; box-shadow: 0 2px 10px rgba(0,0,0,.55); }
@@ -104,7 +106,7 @@ const GLOBAL_CSS = `
 .est-range::-moz-range-progress { height: 4px; border-radius: 2px; background: ${T.gold}; }
 .est-range::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: ${T.goldHi}; border: 2px solid #2a251c; }
 @media (prefers-reduced-motion: reduce) {
-  .est-page, .est-pulse { animation: none; }
+  .est-page, .est-pulse, .est-working { animation: none; }
   .est-panel, .est-lift { transition: none; }
 }
 `;
@@ -531,6 +533,246 @@ function useAttention(hass: Hass): string[] {
   return items;
 }
 
+/* ======================================================== action feedback */
+
+/**
+ * Optimistic feedback for commands whose result arrives late.
+ *
+ * HA confirms a lock about a second after the bolt moves, and a garage door
+ * only once it has finished its ~13s travel. Without this a tap looks like it
+ * did nothing - exactly the "is the UI even responding?" problem.
+ *
+ * The busy flag holds until the entity reaches the state we asked for, or
+ * until the deadline passes: a command that never lands (Z-Wave node gone
+ * dead, ratgdo off WiFi) must not leave the control spinning forever.
+ */
+function useOptimistic(current: string | undefined, timeoutMs = 25000) {
+  const [pending, setPending] = useState<{ target: string; at: number } | null>(null);
+
+  useEffect(() => {
+    if (!pending) return;
+    if (current === pending.target) { setPending(null); return; }
+    const left = Math.max(0, pending.at + timeoutMs - Date.now());
+    const timer = setTimeout(() => setPending(null), left);
+    return () => clearTimeout(timer);
+  }, [pending, current, timeoutMs]);
+
+  return {
+    busy: pending !== null,
+    run(target: string, fire: () => void) {
+      setPending({ target, at: Date.now() });
+      fire();
+    },
+  };
+}
+
+/** Sweeping hairline shown under a control while its command is in flight. */
+function BusyBar({ show }: { show: boolean }) {
+  return (
+    <div
+      aria-hidden="true"
+      className={show ? 'est-working' : undefined}
+      style={{ height: 2, borderRadius: 2, marginTop: 10, opacity: show ? 1 : 0, transition: 'opacity .2s ease' }}
+    />
+  );
+}
+
+/** Verb shown while a command is in flight, given what the thing was before. */
+function busyVerb(kind: 'lock' | 'cover', wasSecure: boolean) {
+  if (kind === 'lock') return wasSecure ? 'Unlocking...' : 'Locking...';
+  return wasSecure ? 'Opening...' : 'Closing...';
+}
+
+/** Settled or transitional wording once nothing of ours is in flight. */
+function restingLabel(kind: 'lock' | 'cover', st: string | undefined, offline: boolean) {
+  if (offline) return 'Offline';
+  if (st === 'opening') return 'Opening...';
+  if (st === 'closing') return 'Closing...';
+  if (kind === 'lock') return st === 'locked' ? 'Locked' : 'Unlocked';
+  return st === 'closed' ? 'Closed' : 'Open';
+}
+
+/**
+ * Scripts fire and forget - there is no settled state to wait for, so the only
+ * honest feedback is "the tap registered and the call went out". Flash a
+ * confirmation briefly instead of leaving the button visually inert, which is
+ * what made the scene buttons feel broken.
+ */
+function FirePill({ hass, script, label, tone, big, icon }: {
+  hass: Hass; script: string; label: string;
+  tone?: 'gold' | 'ghost' | 'alert'; big?: boolean; icon?: string;
+}) {
+  const [fired, setFired] = useState(false);
+
+  useEffect(() => {
+    if (!fired) return;
+    const timer = setTimeout(() => setFired(false), 1700);
+    return () => clearTimeout(timer);
+  }, [fired]);
+
+  return (
+    <Pill
+      tone={tone} big={big} active={fired && tone !== 'gold'} ariaLabel={label}
+      onClick={() => {
+        setFired(true);
+        void hass.callService('script', 'turn_on', {}, { entity_id: script });
+      }}
+    >
+      {icon && !fired ? <Icon d={icon} size={15} /> : null}
+      {fired ? 'Sent ✓' : label}
+    </Pill>
+  );
+}
+
+const FAVORITES: ReadonlyArray<{ entity: string; name: string; kind: 'lock' | 'cover' }> = [
+  { entity: E.lock, name: 'Front Door', kind: 'lock' },
+  { entity: E.garage1, name: 'Main Bay', kind: 'cover' },
+  { entity: E.garage2, name: 'Single Bay', kind: 'cover' },
+];
+
+/**
+ * Compact tap-to-act tile for the Favorites row. One tap toggles, and the tile
+ * narrates the whole round trip rather than going quiet until HA catches up.
+ */
+function ActionTile({ hass, entity, name, kind }: {
+  hass: Hass; entity: string; name: string; kind: 'lock' | 'cover';
+}) {
+  const ids = useMemo(() => [entity], [entity]);
+  const e = useEntities(hass, ids);
+  const st = e[entity]?.state;
+  const { busy, run } = useOptimistic(st);
+
+  const offline = !st || st === 'unavailable' || st === 'unknown';
+  const moving = st === 'opening' || st === 'closing';
+  const secure = kind === 'lock' ? st === 'locked' : st === 'closed';
+  const active = busy || moving;
+  const label = busy ? busyVerb(kind, secure) : restingLabel(kind, st, offline);
+  const tone = offline ? T.alert : active ? T.gold : secure ? T.ok : T.warn;
+
+  const act = () => {
+    if (offline || busy) return;
+    if (kind === 'lock') {
+      run(secure ? 'unlocked' : 'locked',
+        () => void hass.callService('lock', secure ? 'unlock' : 'lock', {}, { entity_id: entity }));
+    } else {
+      run(secure ? 'open' : 'closed',
+        () => void hass.callService('cover', secure ? 'open_cover' : 'close_cover', {}, { entity_id: entity }));
+    }
+  };
+
+  return (
+    <button
+      type="button" onClick={act} disabled={offline || busy}
+      aria-label={name + ' - ' + label} className="est-lift"
+      style={{
+        textAlign: 'left', cursor: offline || busy ? 'default' : 'pointer', minWidth: 0,
+        padding: '14px 16px', borderRadius: 14, color: T.text,
+        border: '1px solid ' + (active ? T.goldDeep : T.line),
+        background: active ? 'rgba(224,179,76,0.08)' : 'rgba(255,255,255,0.04)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+        <span className={active ? 'est-pulse' : undefined} style={{ display: 'inline-flex' }}>
+          <Icon d={kind === 'lock' ? (secure ? P.lock : P.unlock) : P.garage} size={22} color={tone} />
+        </span>
+        <span style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+          <div style={{ fontSize: 11.5, color: tone, marginTop: 2 }}>{label}</div>
+        </span>
+      </div>
+      <BusyBar show={active} />
+    </button>
+  );
+}
+
+/** Full-size front-door panel on the Security page. */
+function FrontDoorCard({ hass }: { hass: Hass }) {
+  const ids = useMemo(() => [E.lock], []);
+  const e = useEntities(hass, ids);
+  const st = e[E.lock]?.state;
+  const { busy, run } = useOptimistic(st);
+
+  const offline = !st || st === 'unavailable' || st === 'unknown';
+  const locked = st === 'locked';
+  const tone = offline ? T.alert : busy ? T.gold : locked ? T.ok : T.alert;
+
+  return (
+    <Glass>
+      <PanelHead label="Front Door" />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <Ring pct={100} size={96} stroke={5} color={tone}>
+          <span className={busy ? 'est-pulse' : undefined} style={{ display: 'inline-flex' }}>
+            <Icon d={locked ? P.lock : P.unlock} size={28} color={tone} />
+          </span>
+        </Ring>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 300, color: tone }}>
+            {busy ? busyVerb('lock', locked) : restingLabel('lock', st, offline)}
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <Pill
+              tone={locked ? 'ghost' : 'gold'}
+              onClick={() => {
+                if (offline || busy) return;
+                run(locked ? 'unlocked' : 'locked',
+                  () => void hass.callService('lock', locked ? 'unlock' : 'lock', {}, { entity_id: E.lock }));
+              }}
+            >
+              {busy ? 'Working...' : locked ? 'Unlock' : 'Lock now'}
+            </Pill>
+          </div>
+          <BusyBar show={busy} />
+        </div>
+      </div>
+    </Glass>
+  );
+}
+
+/** Full-size garage-bay panel on the Security page. */
+function GarageCard({ hass, entity, name }: { hass: Hass; entity: string; name: string }) {
+  const ids = useMemo(() => [entity], [entity]);
+  const e = useEntities(hass, ids);
+  const st = e[entity]?.state;
+  const { busy, run } = useOptimistic(st);
+
+  const offline = !st || st === 'unavailable' || st === 'unknown';
+  const moving = st === 'opening' || st === 'closing';
+  const open = !offline && st !== 'closed';
+  const active = busy || moving;
+  const tone = offline ? T.alert : active ? T.gold : open ? T.warn : T.dim;
+
+  // Mid-travel the useful action is Stop, and a stop has no settled target
+  // state to wait for - so it fires directly rather than through run().
+  const act = () => {
+    if (offline || busy) return;
+    if (moving) { void hass.callService('cover', 'stop_cover', {}, { entity_id: entity }); return; }
+    run(open ? 'closed' : 'open',
+      () => void hass.callService('cover', open ? 'close_cover' : 'open_cover', {}, { entity_id: entity }));
+  };
+
+  return (
+    <Glass>
+      <PanelHead label={name} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <span className={active ? 'est-pulse' : undefined} style={{ display: 'inline-flex' }}>
+          <Icon d={P.garage} size={44} color={tone} />
+        </span>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 300, color: offline ? T.alert : open ? T.warn : T.text }}>
+            {busy ? busyVerb('cover', !open) : restingLabel('cover', st, offline)}
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <Pill tone={open ? 'gold' : 'ghost'} onClick={act}>
+              {moving ? 'Stop' : busy ? 'Working...' : open ? 'Close' : 'Open'}
+            </Pill>
+          </div>
+          <BusyBar show={active} />
+        </div>
+      </div>
+    </Glass>
+  );
+}
+
 /* ================================================================= home */
 
 function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: Page) => void }) {
@@ -539,18 +781,23 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
 
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+      <Glass span={cols} style={{ padding: '16px 18px' }}>
+        <PanelHead label="Favorites" />
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: `repeat(${narrow ? 1 : 3}, minmax(0,1fr))` }}>
+          {FAVORITES.map((f) => (
+            <ActionTile key={f.entity} hass={hass} entity={f.entity} name={f.name} kind={f.kind} />
+          ))}
+        </div>
+      </Glass>
+
       <Glass span={cols} style={{ padding: '18px 22px' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
           <span style={{ ...LABEL, marginRight: 6 }}>Scenes</span>
           {SCENES.map(([label, script]) => (
-            <Pill key={script} onClick={() => void hass.callService('script', 'turn_on', {}, { entity_id: script })}>
-              {label}
-            </Pill>
+            <FirePill key={script} hass={hass} script={script} label={label} />
           ))}
           <span style={{ flex: 1 }} />
-          <Pill tone="gold" big onClick={() => void hass.callService('script', 'turn_on', {}, { entity_id: 'script.whalen_lockup' })} ariaLabel="Run lockup">
-            <Icon d={P.lock} size={15} /> Lockup
-          </Pill>
+          <FirePill hass={hass} script="script.whalen_lockup" label="Lockup" tone="gold" big icon={P.lock} />
         </div>
       </Glass>
 
@@ -951,57 +1198,14 @@ function SecurityPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   ], []);
   const e = useEntities(hass, ids);
   const cols = narrow ? 1 : 3;
-  const locked = e[E.lock]?.state === 'locked';
 
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
-      <Glass>
-        <PanelHead label="Front Door" />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <Ring pct={100} size={96} stroke={5} color={locked ? T.ok : T.alert}>
-            <Icon d={locked ? P.lock : P.unlock} size={28} color={locked ? T.ok : T.alert} />
-          </Ring>
-          <div>
-            <div style={{ fontSize: 18, fontWeight: 300 }}>{locked ? 'Locked' : 'Unlocked'}</div>
-            <div style={{ marginTop: 10 }}>
-              <Pill tone={locked ? 'ghost' : 'gold'}
-                onClick={() => void hass.callService('lock', locked ? 'unlock' : 'lock', {}, { entity_id: E.lock })}>
-                {locked ? 'Unlock' : 'Lock now'}
-              </Pill>
-            </div>
-          </div>
-        </div>
-      </Glass>
+      <FrontDoorCard hass={hass} />
 
-      {([[E.garage1, 'Double Bay'], [E.garage2, 'Single Bay']] as const).map(([id, name]) => {
-        const st = e[id]?.state;
-        const offline = !st || st === 'unavailable' || st === 'unknown';
-        const moving = st === 'opening' || st === 'closing';
-        const open = !offline && st !== 'closed';
-        return (
-          <Glass key={id}>
-            <PanelHead label={name} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <Icon d={P.garage} size={44} color={offline ? T.alert : open ? T.warn : T.dim} />
-              <div>
-                <div style={{ fontSize: 18, fontWeight: 300, color: offline ? T.alert : open ? T.warn : T.text }}>
-                  {offline ? 'Offline' : moving ? (st === 'opening' ? 'Opening...' : 'Closing...') : open ? 'Open' : 'Closed'}
-                </div>
-                <div style={{ marginTop: 10 }}>
-                  <Pill tone={open ? 'gold' : 'ghost'}
-                    onClick={() => void hass.callService(
-                      'cover',
-                      moving ? 'stop_cover' : open ? 'close_cover' : 'open_cover',
-                      {}, { entity_id: id },
-                    )}>
-                    {moving ? 'Stop' : open ? 'Close' : 'Open'}
-                  </Pill>
-                </div>
-              </div>
-            </div>
-          </Glass>
-        );
-      })}
+      {([[E.garage1, 'Double Bay'], [E.garage2, 'Single Bay']] as const).map(([id, name]) => (
+        <GarageCard key={id} hass={hass} entity={id} name={name} />
+      ))}
 
       <Glass span={cols}>
         <PanelHead label="Perimeter" right={
