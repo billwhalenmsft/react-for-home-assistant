@@ -237,3 +237,101 @@ export function ambientWash(elevation: number, clouds: number): string {
     ? 'radial-gradient(120% 80% at 50% -10%, rgba(150,158,172,0.16), rgba(0,0,0,0) 70%)'
     : 'radial-gradient(120% 80% at 50% -10%, rgba(122,160,224,0.16), rgba(0,0,0,0) 70%)';
 }
+
+/* ===================================================== travelling observer */
+
+/**
+ * Sun times for an arbitrary place on Earth.
+ *
+ * Everything else in this file is anchored to Home Assistant's own sun.sun,
+ * which only knows about one house. When Bill is away his phone reports real
+ * GPS, and the sky over Denver is genuinely different from the sky over
+ * Savage - so those numbers have to be solved from scratch.
+ *
+ * Solar noon comes from the standard NOAA approximation: 720 minutes, less
+ * four minutes per degree of longitude, less the equation of time. The
+ * equation of time is the part naive implementations drop, and it is worth up
+ * to about sixteen minutes - the difference between catching sunset and
+ * missing it.
+ *
+ * Times are returned as minutes UTC and rendered in the viewer's own
+ * timezone, which is the right answer in practice: a phone re-homes its clock
+ * when you land.
+ */
+export type SkyTimes = {
+  sunriseUTC: number | null;
+  sunsetUTC: number | null;
+  duskUTC: number | null;
+  noonUTC: number;
+  maxElevation: number;
+  declination: number;
+};
+
+export function solarTimes(lat: number, lon: number, when: Date): SkyTimes {
+  const doy = dayOfYear(when);
+  const decl = declination(doy);
+
+  // Equation of time, minutes.
+  const b = ((360 / 365) * (doy - 81)) * RAD;
+  const eot = 9.87 * Math.sin(2 * b) - 7.53 * Math.cos(b) - 1.5 * Math.sin(b);
+  const noonUTC = 720 - 4 * lon - eot;
+
+  // Hour angle at a given sun elevation; null when the sun never reaches it -
+  // which is a real answer at high latitude, not an error.
+  const hourAngle = (elevDeg: number): number | null => {
+    const cosH =
+      (Math.sin(elevDeg * RAD) - Math.sin(lat * RAD) * Math.sin(decl * RAD))
+      / (Math.cos(lat * RAD) * Math.cos(decl * RAD));
+    if (cosH > 1 || cosH < -1) return null;
+    return Math.acos(cosH) / RAD;
+  };
+
+  // -0.833 deg accounts for refraction and the sun's disc, which is why
+  // published sunset is a few minutes after geometric sunset.
+  const h0 = hourAngle(-0.833);
+  const hDusk = hourAngle(-18);
+
+  return {
+    sunriseUTC: h0 === null ? null : noonUTC - h0 * 4,
+    sunsetUTC: h0 === null ? null : noonUTC + h0 * 4,
+    duskUTC: hDusk === null ? null : noonUTC + hDusk * 4,
+    noonUTC,
+    maxElevation: 90 - Math.abs(lat - decl),
+    declination: decl,
+  };
+}
+
+/** Great-circle distance in miles. */
+export function distanceMiles(aLat: number, aLon: number, bLat: number, bLon: number): number {
+  const dLat = (bLat - aLat) * RAD;
+  const dLon = (bLon - aLon) * RAD;
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos(aLat * RAD) * Math.cos(bLat * RAD) * Math.sin(dLon / 2) ** 2;
+  return 3958.8 * 2 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/** Minutes-UTC to a local clock string in the viewer's timezone. */
+export function utcMinutesToLocal(mins: number | null, ref: Date): string {
+  if (mins === null) return '—';
+  const d = new Date(Date.UTC(
+    ref.getUTCFullYear(), ref.getUTCMonth(), ref.getUTCDate(), 0, 0, 0, 0,
+  ));
+  d.setUTCMinutes(mins);
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+/**
+ * Rough geomagnetic latitude. The auroral oval follows the magnetic pole
+ * (currently near 80.7N, 72.7W), not the geographic one, which is why the
+ * aurora reaches Minnesota far more often than it reaches the same geographic
+ * latitude in Europe.
+ */
+export function geomagneticLatitude(lat: number, lon: number): number {
+  const poleLat = 80.7 * RAD;
+  const poleLon = -72.7 * RAD;
+  const la = lat * RAD;
+  const lo = lon * RAD;
+  const s = Math.sin(la) * Math.sin(poleLat)
+    + Math.cos(la) * Math.cos(poleLat) * Math.cos(lo - poleLon);
+  return Math.asin(Math.max(-1, Math.min(1, s))) / RAD;
+}

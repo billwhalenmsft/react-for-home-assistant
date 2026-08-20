@@ -7,7 +7,9 @@ import { RoomsGrid } from './RoomsGrid';
 import { THEME_CSS } from './theme';
 import { HousePulse, ForecastStrip } from './pulse';
 import { IssMap, type IssState } from './skymap';
-import { SunArc, ambientWash } from './celestial';
+import {
+  SunArc, ambientWash, solarTimes, distanceMiles, utcMinutesToLocal, geomagneticLatitude,
+} from './celestial';
 import { PeopleGrid } from './people';
 
 /**
@@ -251,6 +253,7 @@ const E = {
   sun: 'sun.sun',
   person: 'device_tracker.bills_iphone_17',
   phoneBatt: 'sensor.iphone_battery_level',
+  phone: 'device_tracker.bills_iphone_17',
   blink: 'alarm_control_panel.blink_indoor',
   panel: 'alarm_control_panel.panel',
   lock: 'lock.yale_front_door',
@@ -1738,6 +1741,119 @@ function activeShower(d: Date): string {
   return 'No major shower';
 }
 
+
+/**
+ * The sky wherever you actually are.
+ *
+ * Only appears when the phone is away from home and reporting GPS. Everything
+ * here is solved from that live position rather than from sun.sun, because
+ * sun.sun only ever describes one house - and the whole point of this panel is
+ * the night you are standing somewhere else.
+ */
+function TravelSky({ hass, narrow }: { hass: Hass; narrow: boolean }) {
+  const ids = useMemo(() => [E.phone, E.homeZone, E.moon, E.moonEmoji, E.kp], []);
+  const e = useEntities(hass, ids);
+  const now = useNow(60000);
+
+  const lat = attr(e[E.phone], 'latitude') as number | undefined;
+  const lon = attr(e[E.phone], 'longitude') as number | undefined;
+  const away = e[E.phone]?.state !== 'home';
+  if (!away || typeof lat !== 'number' || typeof lon !== 'number') return null;
+
+  const homeLat = (attr(e[E.homeZone], 'latitude') as number | undefined) ?? 44.72;
+  const homeLon = (attr(e[E.homeZone], 'longitude') as number | undefined) ?? -93.38;
+  const miles = distanceMiles(homeLat, homeLon, lat, lon);
+  // Under ~25 miles the sky is identical to the one at home; showing a second
+  // near-identical set of times would be noise, not information.
+  if (miles < 25) return null;
+
+  const t = solarTimes(lat, lon, now);
+  const magLat = Math.abs(geomagneticLatitude(lat, lon));
+  const kp = num(e[E.kp], -1);
+  // The auroral oval sits near 67 deg magnetic at Kp 0 and pushes ~2 deg
+  // equatorward per Kp step.
+  const ovalEdge = 67 - 2 * Math.max(0, kp);
+  const auroraReach = kp >= 0 && magLat >= ovalEdge;
+
+  const cell: CSSProperties = {
+    padding: '12px 14px', borderRadius: 12,
+    border: `1px solid ${T.line}`, background: 'rgba(255,255,255,0.04)',
+  };
+
+  return (
+    <Glass span={narrow ? 1 : 3} style={{ borderColor: 'rgba(122,160,224,0.35)' }}>
+      <PanelHead
+        label="Where you are tonight"
+        right={
+          <span style={{ fontSize: 11.5, color: T.dim }}>
+            {Math.round(miles).toLocaleString()} mi from home · {lat.toFixed(2)}, {lon.toFixed(2)}
+          </span>
+        }
+      />
+      <div style={{
+        display: 'grid', gap: 12, marginBottom: 14,
+        gridTemplateColumns: `repeat(${narrow ? 2 : 4}, minmax(0,1fr))`,
+      }}>
+        {([
+          ['Sunset', utcMinutesToLocal(t.sunsetUTC, now)],
+          ['Full dark', utcMinutesToLocal(t.duskUTC, now)],
+          ['Sunrise', utcMinutesToLocal(t.sunriseUTC, now)],
+          ['Sun peaks', `${t.maxElevation.toFixed(0)}°`],
+        ] as const).map(([label, value]) => (
+          <div key={label} style={cell}>
+            <div style={LABEL}>{label}</div>
+            <div style={{ fontSize: 20, fontWeight: 300, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
+              {value}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <SunArc
+        lat={lat}
+        solarNoonIso={new Date(Date.UTC(
+          now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0,
+        ).valueOf() + t.noonUTC * 60000).toISOString()}
+        sunriseIso={t.sunriseUTC === null ? undefined : new Date(Date.UTC(
+          now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0,
+        ).valueOf() + t.sunriseUTC * 60000).toISOString()}
+        sunsetIso={t.sunsetUTC === null ? undefined : new Date(Date.UTC(
+          now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0,
+        ).valueOf() + t.sunsetUTC * 60000).toISOString()}
+        elevation={-10}
+        azimuth={180}
+        moonPhase={e[E.moon]?.state}
+      />
+
+      <div style={{
+        display: 'grid', gap: 12, marginTop: 14,
+        gridTemplateColumns: narrow ? '1fr' : '1fr 1fr',
+      }}>
+        <div style={cell}>
+          <div style={LABEL}>Moon tonight</div>
+          <div style={{ fontSize: 15, marginTop: 4 }}>
+            {e[E.moonEmoji]?.state ?? ''} {titleize(e[E.moon]?.state)}
+          </div>
+          <div style={{ fontSize: 11, color: T.faint, marginTop: 4 }}>
+            Phase is the same everywhere on Earth — only the times move.
+          </div>
+        </div>
+        <div style={cell}>
+          <div style={LABEL}>Aurora reach</div>
+          <div style={{ fontSize: 15, marginTop: 4, color: auroraReach ? T.info : T.dim }}>
+            {kp < 0 ? 'Kp unavailable'
+              : auroraReach ? `Possible — Kp ${kp.toFixed(1)} reaches ${magLat.toFixed(0)}° magnetic`
+              : `Unlikely — need Kp ${Math.max(0, Math.ceil((67 - magLat) / 2))}+ here`}
+          </div>
+          <div style={{ fontSize: 11, color: T.faint, marginTop: 4 }}>
+            {magLat.toFixed(1)}° geomagnetic — the oval follows the magnetic pole, not the map.
+          </div>
+        </div>
+      </div>
+    </Glass>
+  );
+}
+
 function SkyPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const now = useNow(30000);
   const ids = useMemo(() => [
@@ -1803,8 +1919,10 @@ function SkyPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
         </div>
       </Glass>
 
+      <TravelSky hass={hass} narrow={narrow} />
+
       <Glass span={cols} style={{ padding: '14px 16px 8px' }}>
-        <PanelHead label="The sky right now" />
+        <PanelHead label="The sky at home" />
         <SkyBanner hass={hass} />
       </Glass>
 
