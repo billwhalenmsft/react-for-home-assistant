@@ -343,13 +343,39 @@ const E = {
   dryer: 'sensor.laundry_room_dryer_machine_state',
 };
 
-const SCENES: ReadonlyArray<[label: string, script: string]> = [
-  ['Movie Time', 'script.whalen_movie_time'],
-  ['All On', 'script.whalen_all_lights_on'],
-  ['All Off', 'script.whalen_all_lights_off'],
-  ['Half On', 'script.whalen_half_on'],
-  ['Goodnight', 'script.whalen_goodnight'],
-  ['Good Morning', 'script.whalen_morning_wake'],
+/**
+ * Scenes, each carrying a plain description of what it will actually do.
+ *
+ * These are read off the real script bodies in scripts.yaml, not invented. A
+ * confirmation that describes the wrong thing is worse than no confirmation:
+ * it trains you to click through without reading. If a script changes, this
+ * text has to change with it.
+ */
+const SCENES: ReadonlyArray<{ label: string; script: string; does: string }> = [
+  {
+    label: 'Movie Time', script: 'script.whalen_movie_time',
+    does: 'Drops the Lutron lights to the movie scene and dims the kitchen Hue to match.',
+  },
+  {
+    label: 'All On', script: 'script.whalen_all_lights_on',
+    does: 'Turns on every Lutron light and sets the main-floor Hue to natural light.',
+  },
+  {
+    label: 'All Off', script: 'script.whalen_all_lights_off',
+    does: 'Turns off every Lutron light and the entire main-floor Hue group.',
+  },
+  {
+    label: 'Half On', script: 'script.whalen_half_on',
+    does: 'Lutron to its half-on scene, main-floor Hue to 40%.',
+  },
+  {
+    label: 'Goodnight', script: 'script.whalen_goodnight',
+    does: 'Puts Adaptive Lighting into sleep mode, turns every light off, and shuts down the Frame TV and the Marantz.',
+  },
+  {
+    label: 'Good Morning', script: 'script.whalen_morning_wake',
+    does: 'Leaves sleep mode, disarms the indoor Blink cameras, and brings the main floor up to the energize scene.',
+  },
 ];
 
 /* ================================================================ shell */
@@ -761,14 +787,17 @@ function restingLabel(kind: 'lock' | 'cover', st: string | undefined, offline: b
  * confirmation briefly instead of leaving the button visually inert, which is
  * what made the scene buttons feel broken.
  */
-function FirePill({ hass, script, label, tone, big, icon, active, onFired }: {
+function FirePill({ hass, script, label, tone, big, icon, active, onFired, confirm }: {
   hass: Hass; script: string; label: string;
   tone?: 'gold' | 'ghost' | 'alert'; big?: boolean; icon?: string;
   /** Stays lit as the most recently run scene. */
   active?: boolean;
   onFired?: () => void;
+  /** What this will do. Present means ask before running. */
+  confirm?: string;
 }) {
   const [fired, setFired] = useState(false);
+  const { guard, dialog } = useGuard();
 
   useEffect(() => {
     if (!fired) return;
@@ -776,18 +805,26 @@ function FirePill({ hass, script, label, tone, big, icon, active, onFired }: {
     return () => clearTimeout(timer);
   }, [fired]);
 
+  const fire = () => {
+    setFired(true);
+    onFired?.();
+    void hass.callService('script', 'turn_on', {}, { entity_id: script });
+  };
+
   return (
-    <Pill
-      tone={tone} big={big} active={(fired || active) && tone !== 'gold'} ariaLabel={label}
-      onClick={() => {
-        setFired(true);
-        onFired?.();
-        void hass.callService('script', 'turn_on', {}, { entity_id: script });
-      }}
-    >
-      {icon && !fired ? <Icon d={icon} size={15} /> : null}
-      {fired ? 'Sent ✓' : label}
-    </Pill>
+    <>
+      <Pill
+        tone={tone} big={big} active={(fired || active) && tone !== 'gold'} ariaLabel={label}
+        onClick={() => {
+          if (!confirm) { fire(); return; }
+          guard({ title: label, body: confirm, verb: `Run ${label}`, run: fire });
+        }}
+      >
+        {icon && !fired ? <Icon d={icon} size={15} /> : null}
+        {fired ? 'Sent ✓' : label}
+      </Pill>
+      {dialog}
+    </>
   );
 }
 
@@ -1044,15 +1081,19 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
       <Glass span={cols} style={{ padding: '18px 22px' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
           <span style={{ ...LABEL, marginRight: 6 }}>Scenes</span>
-          {SCENES.map(([label, script]) => (
+          {SCENES.map((s) => (
             <FirePill
-              key={script} hass={hass} script={script} label={label}
-              active={lastScene === script}
-              onFired={() => setLastScene(script)}
+              key={s.script} hass={hass} script={s.script} label={s.label}
+              confirm={s.does}
+              active={lastScene === s.script}
+              onFired={() => setLastScene(s.script)}
             />
           ))}
           <span style={{ flex: 1 }} />
-          <FirePill hass={hass} script="script.whalen_lockup" label="Lockup" tone="gold" big icon={P.lock} />
+          <FirePill
+            hass={hass} script="script.whalen_lockup" label="Lockup" tone="gold" big icon={P.lock}
+            confirm="Locks the Yale, closes both garage doors, turns every light off, and arms the panel."
+          />
         </div>
       </Glass>
 
