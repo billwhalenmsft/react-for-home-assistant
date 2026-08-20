@@ -7,6 +7,7 @@ import { THEME_CSS } from './theme';
 import { HousePulse, ForecastStrip } from './pulse';
 import { IssMap, type IssState } from './skymap';
 import { SunArc, ambientWash } from './celestial';
+import { PeopleGrid } from './people';
 
 /**
  * WHALEN ESTATE — a Savant/Control4-class surface for Home Assistant.
@@ -70,6 +71,7 @@ const P = {
   plus: 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z',
   minus: 'M19 13H5v-2h14v2z',
   tv: 'M21 3H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5v2h8v-2h5a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 14H3V5h18v12z',
+  people: 'M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z',
   game: 'M21 6H3a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zM11 13H8v3H6v-3H3v-2h3V8h2v3h3v2zm4.5 2a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm4-3a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z',
 };
 
@@ -338,11 +340,12 @@ const SCENES: ReadonlyArray<[label: string, script: string]> = [
 
 /* ================================================================ shell */
 
-type Page = 'home' | 'rooms' | 'cinema' | 'security' | 'grow' | 'sky';
+type Page = 'home' | 'rooms' | 'people' | 'cinema' | 'security' | 'grow' | 'sky';
 
 const NAV: ReadonlyArray<{ id: Page; label: string; icon: string }> = [
   { id: 'home', label: 'Home', icon: P.home },
   { id: 'rooms', label: 'Rooms', icon: P.rooms },
+  { id: 'people', label: 'People', icon: P.people },
   { id: 'cinema', label: 'Cinema', icon: P.cinema },
   { id: 'security', label: 'Security', icon: P.shield },
   { id: 'grow', label: 'Grow', icon: P.leaf },
@@ -387,6 +390,7 @@ export function EstateApp({ hass }: { hass: Hass }) {
         <div key={page} className="est-page" style={{ marginTop: 26 }}>
           {page === 'home' && <HomePage hass={hass} narrow={narrow} go={setPage} />}
           {page === 'rooms' && <RoomsPage hass={hass} narrow={narrow} />}
+          {page === 'people' && <PeoplePage hass={hass} narrow={narrow} />}
           {page === 'cinema' && <CinemaPage hass={hass} narrow={narrow} />}
           {page === 'security' && <SecurityPage hass={hass} narrow={narrow} />}
           {page === 'grow' && <GrowPage hass={hass} narrow={narrow} />}
@@ -1206,6 +1210,17 @@ function RoomsPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   // room-first — pick the room, then what's in it — which is how this kind of
   // system is meant to read. See RoomsGrid.
   return <RoomsGrid hass={hass} narrow={narrow} />;
+}
+
+function PeoplePage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
+  return (
+    <div style={{ display: 'grid', gap: 18 }}>
+      <Glass style={{ padding: 18 }}>
+        <PanelHead label="The family" />
+        <PeopleGrid hass={hass} narrow={narrow} />
+      </Glass>
+    </div>
+  );
 }
 
 function CinemaPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
