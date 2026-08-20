@@ -153,6 +153,14 @@ function RoomModal({ narrow, onClose, children }: {
     <div
       role="dialog"
       aria-modal="true"
+      // Same reason as the confirm dialog: theme tokens live on
+      // .est-root[data-wt-theme], and a portal renders outside it.
+      className="est-root"
+      data-wt-theme={
+        (typeof document !== 'undefined'
+          && document.querySelector('.est-root[data-wt-theme]')?.getAttribute('data-wt-theme'))
+        || 'estate'
+      }
       onClick={onClose}
       style={{
         ...S.modalWrap,

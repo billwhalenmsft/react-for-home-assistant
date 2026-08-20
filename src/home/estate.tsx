@@ -314,6 +314,10 @@ const E = {
     ['Front Door', 'camera.front_door'],
     ['Front Porch', 'camera.front_porch'],
     ['Wyoming Ave', 'camera.wyoming_ave'],
+    ['Living Room', 'camera.living_room'],
+    ['Cat Room', 'camera.cat_room'],
+    ['Kitchen / Dining', 'camera.kitchen_dining'],
+    // camera.unknown ("Outdoor 3 - C9WQ") stays off the wall at Bill's request.
   ] as const,
   soil: 'sensor.ecowitt_soil_moisture_f3621',
   soilBatt: 'sensor.ecowitt_soil_moisture_battery_f3621',
@@ -635,6 +639,7 @@ function useGuard() {
     ? createPortal(
         <div
           role="dialog" aria-modal="true" aria-label={pending.title}
+          className="est-root" data-wt-theme={shellThemeId()}
           onClick={(ev) => { ev.stopPropagation(); setPending(null); }}
           style={{
             position: 'fixed', inset: 0, zIndex: 80, display: 'flex',
@@ -671,6 +676,24 @@ function useGuard() {
     : null;
 
   return { guard: setPending, dialog };
+}
+
+
+/**
+ * The theme id currently on the shell.
+ *
+ * Theme tokens are scoped to `.est-root[data-wt-theme="..."]` (see theme.ts),
+ * and anything portalled to document.body renders OUTSIDE that element - so
+ * every var(--wt-*) inside a portal resolves to nothing. The symptom is ugly
+ * and specific: a gold Pill loses its gradient but keeps its hardcoded dark
+ * text, and the confirm button of a security dialog becomes invisible.
+ *
+ * So portal roots re-declare the class and theme attribute, which puts them
+ * back inside the same variable scope as the rest of the surface.
+ */
+function shellThemeId(): string {
+  if (typeof document === 'undefined') return 'estate';
+  return document.querySelector('.est-root[data-wt-theme]')?.getAttribute('data-wt-theme') ?? 'estate';
 }
 
 /* ======================================================== action feedback */
@@ -738,9 +761,12 @@ function restingLabel(kind: 'lock' | 'cover', st: string | undefined, offline: b
  * confirmation briefly instead of leaving the button visually inert, which is
  * what made the scene buttons feel broken.
  */
-function FirePill({ hass, script, label, tone, big, icon }: {
+function FirePill({ hass, script, label, tone, big, icon, active, onFired }: {
   hass: Hass; script: string; label: string;
   tone?: 'gold' | 'ghost' | 'alert'; big?: boolean; icon?: string;
+  /** Stays lit as the most recently run scene. */
+  active?: boolean;
+  onFired?: () => void;
 }) {
   const [fired, setFired] = useState(false);
 
@@ -752,9 +778,10 @@ function FirePill({ hass, script, label, tone, big, icon }: {
 
   return (
     <Pill
-      tone={tone} big={big} active={fired && tone !== 'gold'} ariaLabel={label}
+      tone={tone} big={big} active={(fired || active) && tone !== 'gold'} ariaLabel={label}
       onClick={() => {
         setFired(true);
+        onFired?.();
         void hass.callService('script', 'turn_on', {}, { entity_id: script });
       }}
     >
@@ -998,6 +1025,10 @@ function SkyBanner({ hass, compact }: { hass: Hass; compact?: boolean }) {
 function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: Page) => void }) {
   const attention = useAttention(hass);
   const cols = narrow ? 1 : 3;
+  // Scripts hold no state HA can report, so "which scene is active" does not
+  // exist as a fact. What DOES exist is which one this surface last ran, and
+  // that is the honest thing to show - a scene that stays lit after you tap it.
+  const [lastScene, setLastScene] = useState<string | null>(null);
 
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
@@ -1014,7 +1045,11 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
           <span style={{ ...LABEL, marginRight: 6 }}>Scenes</span>
           {SCENES.map(([label, script]) => (
-            <FirePill key={script} hass={hass} script={script} label={label} />
+            <FirePill
+              key={script} hass={hass} script={script} label={label}
+              active={lastScene === script}
+              onFired={() => setLastScene(script)}
+            />
           ))}
           <span style={{ flex: 1 }} />
           <FirePill hass={hass} script="script.whalen_lockup" label="Lockup" tone="gold" big icon={P.lock} />
