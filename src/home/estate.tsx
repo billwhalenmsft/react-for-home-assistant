@@ -612,13 +612,57 @@ function Masthead({ hass, narrow }: { hass: Hass; narrow: boolean }) {
  * chores that stay true until a person does something. The second kind needs
  * a human to say "handled", and the board has to let them say it.
  */
+/**
+ * `scope` keeps tent housekeeping off the house board. The Home page is the
+ * glanceable "is the house OK" surface, and a humidifier reservoir or an
+ * offline probe is not a house problem - it belongs on the Grow page. Only a
+ * genuine emergency (soil critical: the plants die if this is ignored) earns
+ * a slot on both.
+ */
 type Attention = {
   text: string;
   tone: 'alert' | 'warn' | 'info';
+  scope?: 'house' | 'grow' | 'both';
   onClear?: () => void;
 };
 
 const TONE_RANK: Record<Attention['tone'], number> = { alert: 0, warn: 1, info: 2 };
+
+/** The chip board, shared by the house board and the tent board. */
+function AttentionBoard({ items, span, label = 'Needs attention' }: {
+  items: Attention[]; span: number; label?: string;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <Glass span={span} style={{ borderColor: 'rgba(224,179,76,0.35)', background: 'rgba(224,179,76,0.06)' }}>
+      <PanelHead label={label} />
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 9 }}>
+        {items.map((a) => {
+          const colour = a.tone === 'alert' ? T.alert : a.tone === 'warn' ? T.warn : T.dim;
+          const chip: CSSProperties = {
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            padding: '7px 14px', borderRadius: 999, fontSize: 12.5, fontWeight: 500,
+            border: '1px solid ' + colour, color: colour, background: 'transparent',
+          };
+          // A chore is a button; a fact is not. Only offer the tap where
+          // tapping actually does something.
+          return a.onClear ? (
+            <button
+              key={a.text} type="button" className="est-lift"
+              onClick={a.onClear} aria-label={a.text + ' - mark done'}
+              style={{ ...chip, cursor: 'pointer' }}
+            >
+              {a.text}
+              <span aria-hidden="true" style={{ fontSize: 11, opacity: 0.75 }}>&#10003; done</span>
+            </button>
+          ) : (
+            <span key={a.text} style={chip}>{a.text}</span>
+          );
+        })}
+      </div>
+    </Glass>
+  );
+}
 
 function useAttention(hass: Hass): Attention[] {
   const ids = useMemo(() => [
@@ -629,8 +673,10 @@ function useAttention(hass: Hass): Attention[] {
   const e = useEntities(hass, ids);
 
   const items: Attention[] = [];
-  const add = (text: string, tone: Attention['tone'], onClear?: () => void) =>
-    items.push({ text, tone, onClear });
+  const add = (
+    text: string, tone: Attention['tone'],
+    onClear?: () => void, scope: Attention['scope'] = 'house',
+  ) => items.push({ text, tone, onClear, scope });
 
   // --- security: anything that leaves the house open ----------------------
   for (const [name, id] of E.doors) {
@@ -645,11 +691,13 @@ function useAttention(hass: Hass): Attention[] {
 
   // --- grow: the tent has no slack, so these outrank housekeeping ---------
   const soil = num(e[E.soil]);
-  if (soil >= 0 && soil < 20) add(`Grow soil critical - ${Math.round(soil)}%`, 'alert');
+  // Soil critical is the one tent condition that is genuinely urgent - ignore
+  // it and the plants are gone - so it earns a place on the house board too.
+  if (soil >= 0 && soil < 20) add(`Grow soil critical - ${Math.round(soil)}%`, 'alert', undefined, 'both');
   const water = num(e[E.water]);
-  if (water >= 0 && water < 25) add(`Humidifier reservoir ${Math.round(water)}%`, 'warn');
+  if (water >= 0 && water < 25) add(`Humidifier reservoir ${Math.round(water)}%`, 'warn', undefined, 'grow');
   const offline = E.growOnline.filter((id) => e[id] && e[id].state !== 'on').length;
-  if (offline > 0) add(`${offline} grow device${offline > 1 ? 's' : ''} offline`, 'alert');
+  if (offline > 0) add(`${offline} grow device${offline > 1 ? 's' : ''} offline`, 'alert', undefined, 'grow');
 
   // --- laundry: standing chores, cleared by a person ----------------------
   // These persist after the machine goes idle, which is the whole point: the
@@ -1156,35 +1204,7 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
         </div>
       </Glass>
 
-      {attention.length > 0 && (
-        <Glass span={cols} style={{ borderColor: 'rgba(224,179,76,0.35)', background: 'rgba(224,179,76,0.06)' }}>
-          <PanelHead label="Needs attention" />
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 9 }}>
-            {attention.map((a) => {
-              const colour = a.tone === 'alert' ? T.alert : a.tone === 'warn' ? T.warn : T.dim;
-              const chip: CSSProperties = {
-                display: 'inline-flex', alignItems: 'center', gap: 8,
-                padding: '7px 14px', borderRadius: 999, fontSize: 12.5, fontWeight: 500,
-                border: '1px solid ' + colour, color: colour, background: 'transparent',
-              };
-              // A chore is a button; a fact is not. Only offer the tap where
-              // tapping actually does something.
-              return a.onClear ? (
-                <button
-                  key={a.text} type="button" className="est-lift"
-                  onClick={a.onClear} aria-label={a.text + ' - mark done'}
-                  style={{ ...chip, cursor: 'pointer' }}
-                >
-                  {a.text}
-                  <span aria-hidden="true" style={{ fontSize: 11, opacity: 0.75 }}>&#10003; done</span>
-                </button>
-              ) : (
-                <span key={a.text} style={chip}>{a.text}</span>
-              );
-            })}
-          </div>
-        </Glass>
-      )}
+      <AttentionBoard items={attention.filter((a) => a.scope !== 'grow')} span={cols} />
 
       <Glass span={narrow ? 1 : 2} style={{ padding: 14 }}>
         <div style={{ padding: '4px 8px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -2023,6 +2043,8 @@ function GrowPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const water = num(e[E.water]);
   const cols = narrow ? 1 : 3;
   const soilColor = soil < 20 ? T.alert : soil < 30 ? T.warn : T.ok;
+  // Tent housekeeping lives here rather than on the house board.
+  const tentAttention = useAttention(hass).filter((a) => a.scope === 'grow' || a.scope === 'both');
 
   const stat = (label: string, value: string) => (
     <div>
@@ -2033,6 +2055,7 @@ function GrowPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
 
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+      <AttentionBoard items={tentAttention} span={cols} label="Tent needs attention" />
       <Glass style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         <PanelHead label="Soil — the one number" />
         <Ring pct={soil} color={soilColor}>
