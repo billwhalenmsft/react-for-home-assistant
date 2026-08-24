@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { useEntities } from '../ha/useEntities';
+import { useEntities, useEntity } from '../ha/useEntities';
 import type { Hass, HassEntity } from '../ha/types';
 import { Floorplan } from './floorplan';
 import { RoomsGrid } from './RoomsGrid';
@@ -76,6 +76,7 @@ const P = {
   tv: 'M21 3H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5v2h8v-2h5a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 14H3V5h18v12z',
   people: 'M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z',
   game: 'M21 6H3a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zM11 13H8v3H6v-3H3v-2h3V8h2v3h3v2zm4.5 2a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm4-3a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z',
+  cog: 'M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z',
 };
 
 function Icon({ d, size = 20, color = 'currentColor' }: { d: string; size?: number; color?: string }) {
@@ -388,7 +389,7 @@ const SCENES: ReadonlyArray<{ label: string; script: string; does: string }> = [
 
 /* ================================================================ shell */
 
-type Page = 'home' | 'rooms' | 'people' | 'cinema' | 'security' | 'grow' | 'sky';
+type Page = 'home' | 'rooms' | 'people' | 'cinema' | 'security' | 'grow' | 'sky' | 'settings';
 
 const NAV: ReadonlyArray<{ id: Page; label: string; icon: string }> = [
   { id: 'home', label: 'Home', icon: P.home },
@@ -398,6 +399,7 @@ const NAV: ReadonlyArray<{ id: Page; label: string; icon: string }> = [
   { id: 'security', label: 'Security', icon: P.shield },
   { id: 'grow', label: 'Grow', icon: P.leaf },
   { id: 'sky', label: 'Sky', icon: P.sky },
+  { id: 'settings', label: 'Setup', icon: P.cog },
 ];
 
 export function EstateApp({ hass }: { hass: Hass }) {
@@ -443,6 +445,7 @@ export function EstateApp({ hass }: { hass: Hass }) {
           {page === 'security' && <SecurityPage hass={hass} narrow={narrow} />}
           {page === 'grow' && <GrowPage hass={hass} narrow={narrow} />}
           {page === 'sky' && <SkyPage hass={hass} narrow={narrow} />}
+          {page === 'settings' && <SettingsPage hass={hass} narrow={narrow} />}
         </div>
       </main>
 
@@ -2209,6 +2212,148 @@ function SkyPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
             © {String(attr(apod, 'copyright')).trim()}
           </div>
         ) : null}
+      </Glass>
+    </div>
+  );
+}
+
+/* ============================================================== settings */
+
+/**
+ * The Settings page edits Home Assistant's truth — every control writes an
+ * input_number / input_datetime helper that the automations read. Nothing here
+ * is stored in the UI: delete this panel and the house behaves identically.
+ */
+
+function SettingSlider({ hass, entity, label, hint }: {
+  hass: Hass; entity: string; label: string; hint: string;
+}) {
+  const ent = useEntity(hass, entity);
+  const min = (attr(ent, 'min') as number | undefined) ?? 0;
+  const max = (attr(ent, 'max') as number | undefined) ?? 100;
+  const step = (attr(ent, 'step') as number | undefined) ?? 1;
+  const unit = (attr(ent, 'unit_of_measurement') as string | undefined) ?? '';
+  const live = num(ent, min);
+  const [drag, setDrag] = useState<number | null>(null);
+  const shown = drag ?? live;
+
+  const commit = () => {
+    if (drag == null) return;
+    void hass.callService('input_number', 'set_value', { value: drag }, { entity_id: entity });
+    setDrag(null);
+  };
+
+  return (
+    <div style={{ padding: '14px 0', borderBottom: `1px solid ${T.line}` }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <div style={{ fontSize: 14.5, fontWeight: 500 }}>{label}</div>
+        <div style={{ fontSize: 17, fontWeight: 600, color: T.gold, fontVariantNumeric: 'tabular-nums' }}>
+          {Math.round(shown)}{unit}
+        </div>
+      </div>
+      <input
+        type="range" min={min} max={max} step={step} value={shown}
+        aria-label={label}
+        className="est-range"
+        style={{ ['--fill' as string]: `${((shown - min) / Math.max(1, max - min)) * 100}%` }}
+        onChange={(ev) => setDrag(Number(ev.target.value))}
+        onPointerUp={commit} onKeyUp={commit} onBlur={commit}
+      />
+      <div style={{ fontSize: 11.5, color: T.dim, marginTop: 2 }}>{hint}</div>
+    </div>
+  );
+}
+
+function SettingTime({ hass, entity, label, hint }: {
+  hass: Hass; entity: string; label: string; hint: string;
+}) {
+  const ent = useEntity(hass, entity);
+  const value = (ent?.state ?? '22:45:00').slice(0, 5);
+  return (
+    <div style={{ padding: '14px 0', borderBottom: `1px solid ${T.line}` }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 14.5, fontWeight: 500 }}>{label}</div>
+          <div style={{ fontSize: 11.5, color: T.dim, marginTop: 2 }}>{hint}</div>
+        </div>
+        <input
+          type="time" value={value} aria-label={label}
+          onChange={(ev) => {
+            if (ev.target.value) void hass.callService('input_datetime', 'set_datetime', { time: ev.target.value + ':00' }, { entity_id: entity });
+          }}
+          style={{
+            fontFamily: 'inherit', fontSize: 16, fontWeight: 600, color: T.gold,
+            background: 'rgba(255,255,255,0.05)', border: `1px solid ${T.line}`,
+            borderRadius: 10, padding: '8px 12px', colorScheme: 'dark',
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SettingAutomationToggle({ hass, entity, label, hint }: {
+  hass: Hass; entity: string; label: string; hint: string;
+}) {
+  const ent = useEntity(hass, entity);
+  const on = ent?.state === 'on';
+  return (
+    <div style={{ padding: '14px 0', borderBottom: `1px solid ${T.line}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+      <div>
+        <div style={{ fontSize: 14.5, fontWeight: 500 }}>{label}</div>
+        <div style={{ fontSize: 11.5, color: T.dim, marginTop: 2 }}>{hint}</div>
+      </div>
+      <Pill active={on} onClick={() => void hass.callService('automation', on ? 'turn_off' : 'turn_on', {}, { entity_id: entity })}>
+        {on ? 'Alerting' : 'Muted'}
+      </Pill>
+    </div>
+  );
+}
+
+function SettingsPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
+  const cols = narrow ? 1 : 2;
+  return (
+    <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+      <Glass span={cols} style={{ padding: '16px 22px' }}>
+        <div style={{ fontSize: 13.5, color: T.dim, lineHeight: 1.6 }}>
+          These controls edit the <b style={{ color: T.text }}>house's own settings</b> — the
+          helpers that alerts and schedules read. Changes apply instantly, survive every UI
+          update, and can also be changed from any Home Assistant app. Device pairing and
+          integrations still live in HA → Settings.
+        </div>
+      </Glass>
+
+      <Glass>
+        <PanelHead label="🌿 Grow alerts" />
+        <SettingSlider hass={hass} entity="input_number.soil_alert_threshold"
+          label="Soil dry alert" hint="Critical push when soil moisture sits below this for 30 minutes." />
+        <SettingSlider hass={hass} entity="input_number.reservoir_alert_threshold"
+          label="Reservoir low alert" hint="Push when the humidifier tank reads below this for 30 minutes." />
+        <SettingAutomationToggle hass={hass} entity="automation.smcc_humidifier_reservoir_low"
+          label="Reservoir alerting" hint="Muted while the tank is out for cleaning — flip back on when it returns." />
+      </Glass>
+
+      <Glass>
+        <PanelHead label="🛡️ Security" />
+        <SettingSlider hass={hass} entity="input_number.garage_open_alert_minutes"
+          label="Garage open nag" hint="Minutes a garage door can sit open before the phone hears about it." />
+        <SettingTime hass={hass} entity="input_datetime.night_sweep_time"
+          label="Night security sweep" hint="Nightly check — silent when everything is locked and closed." />
+      </Glass>
+
+      <Glass>
+        <PanelHead label="🔭 Sky" />
+        <SettingSlider hass={hass} entity="input_number.telescope_cloud_max"
+          label="Telescope cloud ceiling" hint="Telescope Tonight only fires below this cloud cover." />
+      </Glass>
+
+      <Glass>
+        <PanelHead label="🌗 Lighting autopilot" />
+        <div style={{ fontSize: 13, color: T.dim, lineHeight: 1.7 }}>
+          Bed and wake times for Adaptive Lighting live in its own integration options
+          (currently 22:30 / 06:30). A future pass can surface them here; until then:
+          HA → Settings → Integrations → Adaptive Lighting → Configure.
+        </div>
       </Glass>
     </div>
   );
