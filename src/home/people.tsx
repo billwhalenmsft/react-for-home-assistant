@@ -27,7 +27,7 @@ export type Person = {
 
 export const FAMILY: ReadonlyArray<Person> = [
   { id: 'person.wiljr0k5', name: 'Bill', battery: 'sensor.iphone_battery_level' },
-  { id: 'person.erin', name: 'Erin', note: 'has an HA account - needs the app' },
+  { id: 'person.erin', name: 'Erin', battery: 'sensor.erins_iphone_17_pro_max_battery_level' },
   { id: 'person.isaiah', name: 'Isaiah', note: 'St Paul' },
   { id: 'person.rowan', name: 'Rowan' },
   { id: 'person.alex', name: 'Alex' },

@@ -10,7 +10,7 @@ import { IssMap, type IssState } from './skymap';
 import {
   SunArc, ambientWash, solarTimes, distanceMiles, utcMinutesToLocal, geomagneticLatitude,
 } from './celestial';
-import { PeopleGrid } from './people';
+import { PeopleGrid, FAMILY } from './people';
 
 /**
  * WHALEN ESTATE — a Savant/Control4-class surface for Home Assistant.
@@ -289,7 +289,12 @@ const E = {
   epicWhen: 'sensor.nasa_earth_captured',
   laundryWasherFlag: 'input_boolean.washer_needs_unloading',
   laundryDryerFlag: 'input_boolean.dryer_needs_unloading',
+  // Two thermostats, two zones, two different systems - do not conflate them.
+  // `climate` is the alarm.com stat in the lower level; `climateNest` is the
+  // 3rd-gen Nest on the main floor (Great Room <-> Entry wall), live on the
+  // SDM API since 2026-08-23.
   climate: 'climate.family_room',
+  climateNest: 'climate.family_room_family_room',
   allLights: 'light.main_floor_all_lights',
   rooms: [
     { name: 'Kitchen', light: 'light.kitchen_all_lights', temp: 'sensor.blink_kitchen_dining_temperature' },
@@ -526,14 +531,32 @@ function BottomBar({ page, setPage }: { page: Page; setPage: (p: Page) => void }
 
 function Masthead({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const now = useNow(1000);
-  const ids = useMemo(() => [E.weather, E.person, E.headline], []);
+  // Watch every person in the roster, not one hardcoded tracker - as family
+  // members get the companion app they light up here with no code change.
+  const ids = useMemo(
+    () => [E.weather, E.headline, ...FAMILY.map((p) => p.id)],
+    []
+  );
   const e = useEntities(hass, ids);
 
   const w = e[E.weather];
   const temp = attr(w, 'temperature') as number | undefined;
-  const home = e[E.person]?.state === 'home';
+
+  const homeFolks = FAMILY.filter((p) => e[p.id]?.state === 'home');
+  const home = homeFolks.length > 0;
+  // "Bill" / "Bill & Erin" / "Bill, Erin & Rowan"
+  const names = homeFolks.map((p) => p.name);
+  const whoIsHome = names.length === 0
+    ? 'Nobody home'
+    : names.length === 1
+      ? `${names[0]} is home`
+      : `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]} are home`;
+
   const hh = now.getHours();
   const greeting = hh < 12 ? 'Good morning' : hh < 17 ? 'Good afternoon' : 'Good evening';
+  // Greet whoever is actually signed in. Falls back to the bare greeting for
+  // shared surfaces (wall tablet, Cast) where there is no meaningful user.
+  const me = hass.user?.name?.trim().split(/\s+/)[0];
 
   const time = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   const [clock, meridiem] = time.split(' ');
@@ -552,7 +575,7 @@ function Masthead({ hass, narrow }: { hass: Hass; narrow: boolean }) {
           <span style={{ fontSize: narrow ? 16 : 20, fontWeight: 300, color: T.dim }}>{meridiem}</span>
         </div>
         <p style={{ margin: '10px 0 0', color: T.dim, fontSize: 14.5, fontWeight: 300 }}>
-          {greeting}, Bill · {e[E.headline]?.state ?? 'the house is handled'}
+          {me ? `${greeting}, ${me}` : greeting} · {e[E.headline]?.state ?? 'the house is handled'}
         </p>
       </div>
 
@@ -569,7 +592,7 @@ function Masthead({ hass, narrow }: { hass: Hass; narrow: boolean }) {
             width: 9, height: 9, borderRadius: 5, background: home ? T.ok : T.warn,
             boxShadow: `0 0 12px ${home ? T.ok : T.warn}`,
           }} />
-          <span style={{ fontSize: 12.5, color: T.dim }}>{home ? 'Bill is home' : 'Away'}</span>
+          <span style={{ fontSize: 12.5, color: T.dim }}>{whoIsHome}</span>
         </Glass>
       </div>
     </header>
@@ -1264,38 +1287,107 @@ function LightingSummary({ hass, onMore }: { hass: Hass; onMore?: () => void }) 
   );
 }
 
+/**
+ * The house has two thermostats on two unrelated systems: the Nest (main
+ * floor, SDM API) and the alarm.com stat (lower level). Showing one and
+ * hiding the other was how they got conflated in the first place, so the
+ * panel carries both and makes you pick which one you are touching.
+ */
+const CLIMATE_ZONES = [
+  { label: 'Main Floor', badge: 'NEST', entity: E.climateNest },
+  { label: 'Lower Level', badge: 'ALARM.COM', entity: E.climate },
+] as const;
+
 function ClimateDial({ hass }: { hass: Hass }) {
-  const ids = useMemo(() => [E.climate], []);
-  const clim = useEntities(hass, ids)[E.climate];
+  const ids = useMemo(() => CLIMATE_ZONES.map((z) => z.entity), []);
+  const e = useEntities(hass, ids);
+  const [zi, setZi] = useState(0);
+
+  const zone = CLIMATE_ZONES[zi];
+  const clim = e[zone.entity];
   const current = attr(clim, 'current_temperature') as number | undefined;
   const target = attr(clim, 'temperature') as number | undefined;
+  const humidity = attr(clim, 'current_humidity') as number | undefined;
+  const preset = attr(clim, 'preset_mode') as string | undefined;
+  const presets = (attr(clim, 'preset_modes') as string[] | undefined) ?? [];
   const action = (attr(clim, 'hvac_action') as string | undefined) ?? clim?.state;
   const pct = current != null ? ((current - 55) / (90 - 55)) * 100 : 0;
+  const off = clim?.state === 'off';
   const cooling = action === 'cooling' || clim?.state === 'cool';
 
   const bump = (delta: number) => {
     if (target == null) return;
-    void hass.callService('climate', 'set_temperature', { temperature: target + delta }, { entity_id: E.climate });
+    void hass.callService(
+      'climate', 'set_temperature',
+      { temperature: target + delta }, { entity_id: zone.entity }
+    );
   };
+
+  const toggleEco = () => {
+    void hass.callService(
+      'climate', 'set_preset_mode',
+      { preset_mode: preset === 'eco' ? 'none' : 'eco' }, { entity_id: zone.entity }
+    );
+  };
+
+  const zoneTab = (i: number) => {
+    const z = CLIMATE_ZONES[i];
+    const on = i === zi;
+    return (
+      <button
+        key={z.entity}
+        type="button"
+        onClick={() => setZi(i)}
+        aria-pressed={on}
+        style={{
+          font: 'inherit', fontSize: 10.5, letterSpacing: '0.1em', textTransform: 'uppercase',
+          padding: '4px 9px', borderRadius: 999, cursor: 'pointer',
+          border: `1px solid ${on ? T.gold : 'transparent'}`,
+          background: 'transparent', color: on ? T.gold : T.faint,
+        }}
+      >{z.badge}</button>
+    );
+  };
+
+  const sub = [
+    off ? 'Off' : titleize(action),
+    target != null && !off ? `set ${Math.round(target)}°` : null,
+    humidity != null ? `${Math.round(humidity)}% RH` : null,
+  ].filter(Boolean).join(' · ');
 
   return (
     <Glass style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-      <PanelHead label="Climate — Family Room" />
-      <Ring pct={pct} color={cooling ? T.info : T.gold}>
+      <PanelHead
+        label={`Climate — ${zone.label}`}
+        right={<span style={{ display: 'flex', gap: 4 }}>{CLIMATE_ZONES.map((_, i) => zoneTab(i))}</span>}
+      />
+      <Ring pct={pct} color={off ? T.faint : cooling ? T.info : T.gold}>
         <div>
           <div style={{ fontSize: 44, fontWeight: 200, lineHeight: 1 }}>
             {current != null ? Math.round(current) : '—'}°
           </div>
           <div style={{ fontSize: 11, color: T.dim, marginTop: 4, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-            {titleize(action)} · set {target != null ? Math.round(target) : '—'}°
+            {sub}
           </div>
         </div>
       </Ring>
-      <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
-        <Pill onClick={() => bump(-1)} ariaLabel="Lower target temperature"><Icon d={P.minus} size={15} /></Pill>
-        <Pill onClick={() => bump(1)} ariaLabel="Raise target temperature"><Icon d={P.plus} size={15} /></Pill>
+      <div style={{ display: 'flex', gap: 12, marginTop: 16, alignItems: 'center' }}>
+        <Pill onClick={() => bump(-1)} ariaLabel={`Lower ${zone.label} target temperature`}><Icon d={P.minus} size={15} /></Pill>
+        <Pill onClick={() => bump(1)} ariaLabel={`Raise ${zone.label} target temperature`}><Icon d={P.plus} size={15} /></Pill>
+        {presets.includes('eco') && (
+          <button
+            type="button"
+            onClick={toggleEco}
+            aria-pressed={preset === 'eco'}
+            style={{
+              font: 'inherit', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
+              padding: '7px 12px', borderRadius: 999, cursor: 'pointer',
+              border: `1px solid ${preset === 'eco' ? T.ok : T.line}`,
+              background: 'transparent', color: preset === 'eco' ? T.ok : T.dim,
+            }}
+          >Eco</button>
+        )}
       </div>
-      <div style={{ fontSize: 11, color: T.faint, marginTop: 12 }}>Nest joins after the OAuth fix</div>
     </Glass>
   );
 }

@@ -50,6 +50,9 @@ export const ROOM_DEVICES: Record<string, Record<string, RoomDevices>> = {
         'light.front_foyer_front_foyer_main_lights',
         'lock.yale_front_door',
         'binary_sensor.front_door',
+        // Nest 3rd-gen sits on the Great Room <-> Entry wall. The lower-level
+        // stat (climate.family_room) is a different device on alarm.com.
+        'climate.family_room_family_room',
       ],
     },
     Mud: {
