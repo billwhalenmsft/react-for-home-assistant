@@ -4,6 +4,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { useEntities, useEntity } from '../ha/useEntities';
+import { useUserData } from '../ha/useUserData';
 import type { Hass, HassEntity } from '../ha/types';
 import { Floorplan } from './floorplan';
 import { RoomsGrid } from './RoomsGrid';
@@ -410,9 +411,41 @@ const NAV: ReadonlyArray<{ id: Page; label: string; icon: string }> = [
   { id: 'settings', label: 'Setup', icon: P.cog },
 ];
 
+/**
+ * Pages are addressable via the URL hash (#security, #grow, ...) so a push
+ * notification can deep-link to the page that explains it. Without this every
+ * page shares one URL and a notification tap lands on Home, which is exactly
+ * the "clicking it doesn't open anything tangible" complaint.
+ */
+const PAGE_IDS = new Set<string>(NAV.map((n) => n.id));
+
+function pageFromHash(): Page {
+  const h = (window.location.hash || '').replace(/^#\/?/, '').split('?')[0];
+  return PAGE_IDS.has(h) ? (h as Page) : 'home';
+}
+
 export function EstateApp({ hass }: { hass: Hass }) {
-  const [page, setPage] = useState<Page>('home');
+  const [page, setPageState] = useState<Page>(pageFromHash);
   const narrow = useNarrow();
+
+  // Writing the hash keeps the URL shareable and gives the back button
+  // something sensible to do; replaceState avoids stacking one history entry
+  // per tab tap.
+  const setPage = (p: Page) => {
+    setPageState(p);
+    const next = `#${p}`;
+    if (window.location.hash !== next) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search + next);
+    }
+  };
+
+  // React to the hash changing underneath us - a notification opened while the
+  // dashboard is already on screen changes the hash without remounting.
+  useEffect(() => {
+    const onHash = () => setPageState(pageFromHash());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
 
   // Themes are built and shipped (see theme.ts) but the picker is hidden for
   // now, so this is pinned to the default. To re-enable: import useTheme,
@@ -874,17 +907,19 @@ function BusyBar({ show }: { show: boolean }) {
 }
 
 /** Verb shown while a command is in flight, given what the thing was before. */
-function busyVerb(kind: 'lock' | 'cover', wasSecure: boolean) {
+function busyVerb(kind: FavKind, wasSecure: boolean) {
   if (kind === 'lock') return wasSecure ? 'Unlocking...' : 'Locking...';
+  if (kind === 'light' || kind === 'switch') return wasSecure ? 'Turning on...' : 'Turning off...';
   return wasSecure ? 'Opening...' : 'Closing...';
 }
 
 /** Settled or transitional wording once nothing of ours is in flight. */
-function restingLabel(kind: 'lock' | 'cover', st: string | undefined, offline: boolean) {
+function restingLabel(kind: FavKind, st: string | undefined, offline: boolean) {
   if (offline) return 'Offline';
   if (st === 'opening') return 'Opening...';
   if (st === 'closing') return 'Closing...';
   if (kind === 'lock') return st === 'locked' ? 'Locked' : 'Unlocked';
+  if (kind === 'light' || kind === 'switch') return st === 'on' ? 'On' : 'Off';
   return st === 'closed' ? 'Closed' : 'Open';
 }
 
@@ -935,18 +970,41 @@ function FirePill({ hass, script, label, tone, big, icon, active, onFired, confi
   );
 }
 
-const FAVORITES: ReadonlyArray<{ entity: string; name: string; kind: 'lock' | 'cover' }> = [
+type FavKind = 'lock' | 'cover' | 'light' | 'switch';
+type Fav = { entity: string; name: string; kind: FavKind };
+
+/**
+ * Everything a person is allowed to pin to their rail.
+ *
+ * A curated catalog rather than a "favorite" button scattered across the UI:
+ * a star buried on each control is easy to miss and hard to find again, and
+ * you end up hunting the house for the one tile you want to unpin. One edit
+ * button on the panel, one list, add and remove in the same place.
+ */
+const FAV_CATALOG: ReadonlyArray<Fav> = [
   { entity: E.lock, name: 'Front Door', kind: 'lock' },
   { entity: E.garage1, name: 'Main Bay', kind: 'cover' },
   { entity: E.garage2, name: 'Single Bay', kind: 'cover' },
+  { entity: 'light.main_floor_all_lights', name: 'Main Floor', kind: 'light' },
+  { entity: 'light.kitchen_all_lights', name: 'Kitchen', kind: 'light' },
+  { entity: 'light.living_room_living_room_main_lights', name: 'Living Room', kind: 'light' },
+  { entity: 'light.dining_room_dining_room_chandelier', name: 'Chandelier', kind: 'light' },
+  { entity: 'light.front_foyer_front_foyer_main_lights', name: 'Front Foyer', kind: 'light' },
+  { entity: 'light.mudroom_mudroom_main_lights', name: 'Mudroom', kind: 'light' },
+  { entity: 'light.kitchen_kitchen_island_pendants', name: 'Island Pendants', kind: 'light' },
+  { entity: 'light.garage_single_light', name: 'Single Bay Light', kind: 'light' },
+  { entity: 'light.garage_main_garage_stall_light', name: 'Main Bay Light', kind: 'light' },
 ];
+
+/** What a brand-new user sees before they have edited anything. */
+const FAV_DEFAULT: ReadonlyArray<string> = [E.lock, E.garage1, E.garage2];
 
 /**
  * Compact tap-to-act tile for the Favorites row. One tap toggles, and the tile
  * narrates the whole round trip rather than going quiet until HA catches up.
  */
 function ActionTile({ hass, entity, name, kind }: {
-  hass: Hass; entity: string; name: string; kind: 'lock' | 'cover';
+  hass: Hass; entity: string; name: string; kind: FavKind;
 }) {
   const ids = useMemo(() => [entity], [entity]);
   const e = useEntities(hass, ids);
@@ -956,13 +1014,23 @@ function ActionTile({ hass, entity, name, kind }: {
 
   const offline = !st || st === 'unavailable' || st === 'unknown';
   const moving = st === 'opening' || st === 'closing';
-  const secure = kind === 'lock' ? st === 'locked' : st === 'closed';
+  const toggleKind = kind === 'light' || kind === 'switch';
+  // "secure" means the resting, safe state: locked, closed, or off.
+  const secure = kind === 'lock' ? st === 'locked'
+    : toggleKind ? st !== 'on'
+    : st === 'closed';
   const active = busy || moving;
   const label = busy ? busyVerb(kind, secure) : restingLabel(kind, st, offline);
   const tone = offline ? T.alert : active ? T.gold : secure ? T.ok : T.warn;
 
   const act = () => {
     if (offline || busy) return;
+    if (toggleKind) {
+      // Lights and switches are freely reversible - no confirmation earned.
+      run(secure ? 'on' : 'off',
+        () => void hass.callService(kind, secure ? 'turn_on' : 'turn_off', {}, { entity_id: entity }));
+      return;
+    }
     if (kind === 'lock') {
       const fire = () => run(secure ? 'unlocked' : 'locked',
         () => void hass.callService('lock', secure ? 'unlock' : 'lock', {}, { entity_id: entity }));
@@ -1000,7 +1068,8 @@ function ActionTile({ hass, entity, name, kind }: {
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
         <span className={active ? 'est-pulse' : undefined} style={{ display: 'inline-flex' }}>
-          <Icon d={kind === 'lock' ? (secure ? P.lock : P.unlock) : P.garage} size={22} color={tone} />
+          <Icon d={kind === 'lock' ? (secure ? P.lock : P.unlock)
+                   : toggleKind ? P.bulb : P.garage} size={22} color={tone} />
         </span>
         <span style={{ minWidth: 0 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
@@ -1011,6 +1080,98 @@ function ActionTile({ hass, entity, name, kind }: {
     </button>
     {dialog}
     </>
+  );
+}
+
+/**
+ * The per-user favorites rail.
+ *
+ * Each HA user gets their own list (stored server-side against their account),
+ * so Bill's rail and Erin's rail differ on the same wall tablet. Editing lives
+ * on the panel rather than as a star on every control - one place to add and
+ * remove beats hunting the house for the tile you want to unpin.
+ */
+function FavoritesPanel({ hass, span, narrow }: { hass: Hass; span: number; narrow: boolean }) {
+  const [ids, saveIds, loaded] = useUserData<string[]>(
+    hass, 'estate_favorites', [...FAV_DEFAULT]
+  );
+  const [editing, setEditing] = useState(false);
+
+  const chosen = ids
+    .map((id) => FAV_CATALOG.find((f) => f.entity === id))
+    .filter((f): f is Fav => !!f);
+
+  const toggle = (entity: string) => {
+    saveIds(ids.includes(entity) ? ids.filter((x) => x !== entity) : [...ids, entity]);
+  };
+
+  return (
+    <Glass span={span} style={{ padding: '16px 18px' }}>
+      <PanelHead
+        label="Favorites"
+        right={
+          <button
+            type="button"
+            onClick={() => setEditing((v) => !v)}
+            aria-pressed={editing}
+            style={{
+              font: 'inherit', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
+              padding: '5px 12px', borderRadius: 999, cursor: 'pointer',
+              border: `1px solid ${editing ? T.gold : T.line}`,
+              background: 'transparent', color: editing ? T.gold : T.dim,
+            }}
+          >{editing ? 'Done' : 'Edit'}</button>
+        }
+      />
+
+      {editing ? (
+        <div>
+          <p style={{ margin: '0 0 12px', fontSize: 12.5, color: T.dim, fontWeight: 300 }}>
+            Pick what you want on your rail. This list is yours - other people
+            signed in to Home Assistant keep their own.
+          </p>
+          <div style={{ display: 'grid', gap: 8, gridTemplateColumns: `repeat(${narrow ? 1 : 3}, minmax(0,1fr))` }}>
+            {FAV_CATALOG.map((f) => {
+              const on = ids.includes(f.entity);
+              return (
+                <button
+                  key={f.entity} type="button" onClick={() => toggle(f.entity)}
+                  aria-pressed={on}
+                  style={{
+                    font: 'inherit', textAlign: 'left', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '10px 12px', borderRadius: 12,
+                    border: `1px solid ${on ? T.gold : T.line}`,
+                    background: on ? 'rgba(224,179,76,0.08)' : 'transparent',
+                    color: on ? T.text : T.dim,
+                  }}
+                >
+                  <span style={{ fontSize: 15, width: 14, textAlign: 'center' }}>{on ? '✓' : '+'}</span>
+                  <span style={{ fontSize: 13, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {f.name}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : chosen.length === 0 ? (
+        <p style={{ margin: 0, fontSize: 13, color: T.dim, fontWeight: 300 }}>
+          {loaded ? 'Nothing pinned yet - tap Edit to choose.' : 'Loading your rail...'}
+        </p>
+      ) : (
+        // Square-ish tiles: compact, thumb-sized, and they tile evenly instead
+        // of stretching into wide rows on a big screen.
+        <div style={{
+          display: 'grid', gap: 10,
+          gridTemplateColumns: `repeat(auto-fill, minmax(${narrow ? 130 : 150}px, 1fr))`,
+        }}>
+          {chosen.map((f) => (
+            <ActionTile key={f.entity} hass={hass} entity={f.entity} name={f.name} kind={f.kind} />
+          ))}
+        </div>
+      )}
+    </Glass>
   );
 }
 
@@ -1176,14 +1337,7 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
 
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
-      <Glass span={cols} style={{ padding: '16px 18px' }}>
-        <PanelHead label="Favorites" />
-        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: `repeat(${narrow ? 1 : 3}, minmax(0,1fr))` }}>
-          {FAVORITES.map((f) => (
-            <ActionTile key={f.entity} hass={hass} entity={f.entity} name={f.name} kind={f.kind} />
-          ))}
-        </div>
-      </Glass>
+      <FavoritesPanel hass={hass} span={cols} narrow={narrow} />
 
       <Glass span={cols} style={{ padding: '18px 22px' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
