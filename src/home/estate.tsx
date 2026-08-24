@@ -677,26 +677,48 @@ function useGuard() {
             WebkitBackdropFilter: 'blur(6px)',
           }}
         >
+          {/* Deliberately hard-coded colors: this dialog must stay readable no
+              matter what the active shell theme does to the tokens. */}
           <div
             onClick={(ev) => ev.stopPropagation()}
             style={{
-              width: 'min(380px, 100%)', padding: 22, borderRadius: 16,
-              background: T.ground, border: `1px solid ${T.lineHi}`,
-              boxShadow: '0 24px 60px rgba(0,0,0,0.55)', color: T.text,
+              width: 'min(400px, 100%)', padding: '24px 24px 20px', borderRadius: 18,
+              background: '#181d24',
+              border: '1px solid rgba(211,176,110,0.5)',
+              boxShadow: '0 30px 90px rgba(0,0,0,0.8), 0 0 0 1px rgba(0,0,0,0.6)',
+              color: '#f2efe9',
             }}
           >
-            <div style={{ fontSize: 19, fontWeight: 500 }}>{pending.title}</div>
-            <div style={{ fontSize: 13.5, color: T.dim, marginTop: 8, lineHeight: 1.5 }}>
+            <div style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em' }}>{pending.title}</div>
+            <div style={{ fontSize: 14, color: '#bcb5a7', marginTop: 9, lineHeight: 1.55 }}>
               {pending.body}
             </div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>
-              <Pill tone="ghost" onClick={() => setPending(null)}>Cancel</Pill>
-              <Pill
-                tone="gold"
+            <div style={{ display: 'flex', gap: 10, marginTop: 22, justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setPending(null)}
+                style={{
+                  padding: '11px 20px', borderRadius: 999, cursor: 'pointer',
+                  fontSize: 13.5, fontWeight: 600, fontFamily: 'inherit',
+                  border: '1px solid #4a525c', background: '#242b33', color: '#e8e5de',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
                 onClick={() => { const go = pending.run; setPending(null); go(); }}
+                style={{
+                  padding: '11px 22px', borderRadius: 999, cursor: 'pointer',
+                  fontSize: 13.5, fontWeight: 700, fontFamily: 'inherit',
+                  border: '1px solid #a8814a',
+                  background: 'linear-gradient(180deg, #e8cf96, #c9a15c)',
+                  color: '#191408',
+                  boxShadow: '0 6px 22px rgba(211,176,110,0.4)',
+                }}
               >
                 {pending.verb}
-              </Pill>
+              </button>
             </div>
           </div>
         </div>,
@@ -1095,7 +1117,7 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
           <span style={{ flex: 1 }} />
           <FirePill
             hass={hass} script="script.whalen_lockup" label="Lockup" tone="gold" big icon={P.lock}
-            confirm="Locks the Yale, closes both garage doors, turns every light off, and arms the panel."
+            confirm="Locks the Yale, closes both garage doors, and turns every light off."
           />
         </div>
       </Glass>
