@@ -2656,14 +2656,50 @@ function SettingAutomationToggle({ hass, entity, label, hint }: {
 
 function SettingsPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const cols = narrow ? 1 : 2;
+  const admin = hass.user?.is_admin === true;
+
+  /* Non-admins get a personal profile page, never the house dials. House
+     thresholds/schedules are global facts — one soil alert level for the whole
+     tent — so only administrators shape them. Personal alert subscriptions
+     (which pushes each person receives, quiet hours) land here per-person as
+     family members connect their companion apps. */
+  if (!admin) {
+    return (
+      <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+        <Glass span={cols}>
+          <PanelHead label="My profile" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: 18, display: 'grid', placeItems: 'center',
+              background: `linear-gradient(160deg, ${T.gold}, ${T.goldDeep})`, color: '#191408',
+              fontWeight: 800, fontSize: 22,
+            }}>{(hass.user?.name ?? '?').slice(0, 1).toUpperCase()}</div>
+            <div>
+              <div style={{ fontSize: 19, fontWeight: 400 }}>{hass.user?.name ?? 'Guest'}</div>
+              <div style={{ fontSize: 12.5, color: T.dim, marginTop: 3 }}>Member of the Whalen Estate</div>
+            </div>
+          </div>
+        </Glass>
+        <Glass span={cols}>
+          <PanelHead label="Personal alerts" />
+          <div style={{ fontSize: 13.5, color: T.dim, lineHeight: 1.7 }}>
+            Once your phone runs the Home Assistant companion app, this page grows your
+            personal switches: which alerts reach <i>you</i> (security, laundry, sky…),
+            and your quiet hours. House-wide settings are managed by the administrator.
+          </div>
+        </Glass>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
       <Glass span={cols} style={{ padding: '16px 22px' }}>
         <div style={{ fontSize: 13.5, color: T.dim, lineHeight: 1.6 }}>
-          These controls edit the <b style={{ color: T.text }}>house's own settings</b> — the
-          helpers that alerts and schedules read. Changes apply instantly, survive every UI
-          update, and can also be changed from any Home Assistant app. Device pairing and
-          integrations still live in HA → Settings.
+          <b style={{ color: T.gold }}>Administrator view.</b> These controls edit the{' '}
+          <b style={{ color: T.text }}>house's own settings</b> — the helpers that alerts and
+          schedules read. Changes apply instantly, survive every UI update, and affect the
+          whole household. Family members see a personal profile page here instead.
         </div>
       </Glass>
 
