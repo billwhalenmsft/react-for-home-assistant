@@ -1544,7 +1544,10 @@ function RoomsPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
             background: 'linear-gradient(90deg, rgba(0,0,0,0.55), rgba(0,0,0,0) 32%, rgba(0,0,0,0) 70%, rgba(0,0,0,0.45))',
           }}
         />
-        <div style={{ position: 'absolute', left: 18, bottom: 14, pointerEvents: 'none' }}>
+        {/* lineHeight is reset here on purpose: the wrapper zeroes it to kill
+            the inline gap under the <img>, and that inherits into this caption
+            and collapses both lines onto the same baseline. */}
+        <div style={{ position: 'absolute', left: 18, bottom: 14, pointerEvents: 'none', lineHeight: 1.35 }}>
           <div style={{ ...LABEL, color: 'rgba(255,255,255,0.72)' }}>The main floor</div>
           <div style={{ fontSize: 15, fontWeight: 300, color: '#fff', marginTop: 2 }}>
             Kitchen → Great Room → Dining
