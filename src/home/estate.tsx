@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  useEffect, useMemo, useRef, useState,
+  type CSSProperties, type ReactNode, type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { useEntities, useEntity } from '../ha/useEntities';
 import type { Hass, HassEntity } from '../ha/types';
@@ -1311,23 +1314,79 @@ function ClimateDial({ hass }: { hass: Hass }) {
   const preset = attr(clim, 'preset_mode') as string | undefined;
   const presets = (attr(clim, 'preset_modes') as string[] | undefined) ?? [];
   const action = (attr(clim, 'hvac_action') as string | undefined) ?? clim?.state;
-  const pct = current != null ? ((current - 55) / (90 - 55)) * 100 : 0;
+  const loT = (attr(clim, 'min_temp') as number | undefined) ?? 50;
+  const hiT = (attr(clim, 'max_temp') as number | undefined) ?? 90;
   const off = clim?.state === 'off';
   const cooling = action === 'cooling' || clim?.state === 'cool';
 
+  // Google's SDM API rate-limits thermostat commands per user, and it does not
+  // take much to trip: four taps a few hundred ms apart earned a 429
+  // RESOURCE_EXHAUSTED. So taps move a local target and only the settled value
+  // is sent, once the user stops pressing. One gesture, one command.
+  const [draft, setDraft] = useState<number | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const sendTimer = useRef<number | undefined>(undefined);
+  const holdTimer = useRef<number | undefined>(undefined);
+
+  // Switching zones must not carry one stat's draft over to the other.
+  useEffect(() => { setDraftValue(null); setNotice(null); }, [zi]);
+  useEffect(() => () => {
+    window.clearTimeout(sendTimer.current);
+    window.clearTimeout(holdTimer.current);
+  }, []);
+
+  // The authoritative draft lives in a ref, not in state. A fast drag delivers
+  // several moves inside a single React tick, and batched state hands every
+  // one of them the same stale base - so a twelve-degree drag would only ever
+  // move one degree. The ref accumulates synchronously; state only renders it.
+  const draftRef = useRef<number | null>(null);
+  const setDraftValue = (v: number | null) => { draftRef.current = v; setDraft(v); };
+
+  const shownTarget = draft ?? target;
+
   const bump = (delta: number) => {
-    if (target == null) return;
-    void hass.callService(
-      'climate', 'set_temperature',
-      { temperature: target + delta }, { entity_id: zone.entity }
-    );
+    const base = draftRef.current ?? target;
+    if (base == null) return;
+    const next = Math.min(hiT, Math.max(loT, base + delta));
+    if (next === draftRef.current) return;
+    setDraftValue(next);
+    setNotice(null);
+    window.clearTimeout(sendTimer.current);
+    sendTimer.current = window.setTimeout(() => {
+      hass.callService(
+        'climate', 'set_temperature',
+        { temperature: next }, { entity_id: zone.entity }
+      ).then(
+        () => {
+          // Hold the draft briefly so the ring doesn't snap back to the old
+          // value while the SDM round-trip lands.
+          holdTimer.current = window.setTimeout(() => setDraftValue(null), 4000);
+        },
+        (err: unknown) => {
+          const msg = String((err as { message?: string })?.message ?? err);
+          setNotice(
+            /429|RESOURCE_EXHAUSTED|Too Many Requests/i.test(msg)
+              ? 'Nest is rate-limiting — give it a moment'
+              : 'Could not set temperature'
+          );
+          setDraftValue(null);
+        }
+      );
+    }, 900);
   };
 
   const toggleEco = () => {
-    void hass.callService(
+    hass.callService(
       'climate', 'set_preset_mode',
       { preset_mode: preset === 'eco' ? 'none' : 'eco' }, { entity_id: zone.entity }
-    );
+    ).catch((err: unknown) => {
+      const msg = String((err as { message?: string })?.message ?? err);
+      setNotice(
+        /429|RESOURCE_EXHAUSTED|Too Many Requests/i.test(msg)
+          ? 'Nest is rate-limiting — give it a moment'
+          : 'Could not change preset'
+      );
+    });
   };
 
   const zoneTab = (i: number) => {
@@ -1349,11 +1408,53 @@ function ClimateDial({ hass }: { hass: Hass }) {
     );
   };
 
-  const sub = [
-    off ? 'Off' : titleize(action),
-    target != null && !off ? `set ${Math.round(target)}°` : null,
-    humidity != null ? `${Math.round(humidity)}% RH` : null,
-  ].filter(Boolean).join(' · ');
+  // Drag up = warmer, down = cooler. Vertical drag rather than an angular
+  // grab: it is far more forgiving on a phone, where an angular ring competes
+  // with page scroll (a well-known complaint about circular thermostat
+  // sliders). Movement is consumed in whole degrees so the gesture tracks the
+  // finger 1:1, and each step just resets the send debounce.
+  const dragRef = useRef<{ y: number } | null>(null);
+  const PX_PER_DEGREE = 10;
+
+  const onDown = (e: ReactPointerEvent) => {
+    if (off || target == null) return;
+    dragRef.current = { y: e.clientY };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const onMove = (e: ReactPointerEvent) => {
+    const st = dragRef.current;
+    if (!st) return;
+    const steps = Math.trunc((st.y - e.clientY) / PX_PER_DEGREE);
+    if (steps !== 0) {
+      bump(steps);
+      st.y -= steps * PX_PER_DEGREE; // consume what we applied
+    }
+  };
+  const endDrag = () => { dragRef.current = null; };
+
+  const accent = off ? T.faint : cooling ? T.info : T.gold;
+  // The ring tracks the TARGET, not ambient - otherwise dragging moves the
+  // number but not the dial, which is exactly the "can't tell it's updating"
+  // problem.
+  const ringPct = shownTarget != null
+    ? ((shownTarget - loT) / (hiT - loT)) * 100
+    : 0;
+  const sending = draft != null;
+
+  const stepBtn = (delta: number, path: string, label: string) => (
+    <button
+      type="button"
+      onClick={() => bump(delta)}
+      aria-label={label}
+      disabled={off}
+      style={{
+        width: 46, height: 46, borderRadius: 999, cursor: off ? 'default' : 'pointer',
+        display: 'grid', placeItems: 'center',
+        border: `1px solid ${T.line}`, background: 'transparent',
+        color: off ? T.faint : T.text, opacity: off ? 0.5 : 1,
+      }}
+    ><Icon d={path} size={18} /></button>
+  );
 
   return (
     <Glass style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -1361,32 +1462,67 @@ function ClimateDial({ hass }: { hass: Hass }) {
         label={`Climate — ${zone.label}`}
         right={<span style={{ display: 'flex', gap: 4 }}>{CLIMATE_ZONES.map((_, i) => zoneTab(i))}</span>}
       />
-      <Ring pct={pct} color={off ? T.faint : cooling ? T.info : T.gold}>
-        <div>
-          <div style={{ fontSize: 44, fontWeight: 200, lineHeight: 1 }}>
-            {current != null ? Math.round(current) : '—'}°
+
+      <div
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        style={{
+          touchAction: 'none', userSelect: 'none',
+          cursor: off ? 'default' : 'ns-resize',
+        }}
+      >
+        <Ring pct={ringPct} color={accent}>
+          <div>
+            <div style={{
+              fontSize: 10.5, letterSpacing: '0.16em', textTransform: 'uppercase',
+              color: sending ? accent : T.faint,
+            }}>
+              {off ? 'Off' : sending ? 'Setting' : 'Target'}
+            </div>
+            <div style={{
+              fontSize: 58, fontWeight: 200, lineHeight: 1.05,
+              color: off ? T.dim : sending ? accent : T.text,
+              transition: 'color .2s',
+            }}>
+              {shownTarget != null ? Math.round(shownTarget) : '—'}°
+            </div>
+            <div style={{ fontSize: 13, color: T.dim, marginTop: 6, fontWeight: 300 }}>
+              Now {current != null ? Math.round(current) : '—'}°
+              {humidity != null ? ` · ${Math.round(humidity)}% RH` : ''}
+            </div>
           </div>
-          <div style={{ fontSize: 11, color: T.dim, marginTop: 4, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-            {sub}
-          </div>
-        </div>
-      </Ring>
-      <div style={{ display: 'flex', gap: 12, marginTop: 16, alignItems: 'center' }}>
-        <Pill onClick={() => bump(-1)} ariaLabel={`Lower ${zone.label} target temperature`}><Icon d={P.minus} size={15} /></Pill>
-        <Pill onClick={() => bump(1)} ariaLabel={`Raise ${zone.label} target temperature`}><Icon d={P.plus} size={15} /></Pill>
+        </Ring>
+      </div>
+
+      {/* Reserved line so the panel never reflows when a message appears. */}
+      <div style={{
+        minHeight: 18, marginTop: 10, fontSize: 12.5, fontWeight: 300, textAlign: 'center',
+        color: notice ? T.warn : T.dim,
+      }}>
+        {notice ?? (off ? 'System off' : titleize(action))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 14, marginTop: 12, alignItems: 'center' }}>
+        {stepBtn(-1, P.minus, `Lower ${zone.label} target temperature`)}
+        {stepBtn(1, P.plus, `Raise ${zone.label} target temperature`)}
         {presets.includes('eco') && (
           <button
             type="button"
             onClick={toggleEco}
             aria-pressed={preset === 'eco'}
             style={{
-              font: 'inherit', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
-              padding: '7px 12px', borderRadius: 999, cursor: 'pointer',
+              font: 'inherit', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase',
+              height: 46, padding: '0 16px', borderRadius: 999, cursor: 'pointer',
               border: `1px solid ${preset === 'eco' ? T.ok : T.line}`,
               background: 'transparent', color: preset === 'eco' ? T.ok : T.dim,
             }}
           >Eco</button>
         )}
+      </div>
+      <div style={{ fontSize: 11, color: T.faint, marginTop: 10 }}>
+        Drag the dial up or down
       </div>
     </Glass>
   );
