@@ -1291,6 +1291,123 @@ function LightingSummary({ hass, onMore }: { hass: Hass; onMore?: () => void }) 
 }
 
 /**
+ * The Nest face, drawn the way the device itself draws it: a dark dial that
+ * glows from the rim with whatever the system is doing, a tick ring for the
+ * scale, one bright marker at the target, and a separate small marker showing
+ * where the room actually is.
+ *
+ * Hues are literal rather than theme tokens so this matches the Lovelace card
+ * on Mission Control - both surfaces should read as the same device.
+ */
+const NEST_HUE = {
+  heating: '#ff8a3d',
+  cooling: '#4aa8ff',
+  idle: '#7a8698',
+  off: '#5b6473',
+};
+
+const TICK_COUNT = 60;
+const FACE_START = 135;   // degrees in SVG space (0 = 3 o'clock)
+const FACE_SWEEP = 270;
+
+function NestFace({
+  target, current, lo, hi, hue, active, off, capTop, capBottom, unit,
+}: {
+  target: number | null; current: number | null;
+  lo: number; hi: number; hue: string;
+  active: boolean; off: boolean;
+  capTop: string; capBottom: string; unit: string;
+}) {
+  const S = 240, C = S / 2;
+  const angleFor = (t: number) =>
+    FACE_START + Math.min(1, Math.max(0, (t - lo) / (hi - lo))) * FACE_SWEEP;
+  const pt = (r: number, deg: number) => {
+    const rad = (deg * Math.PI) / 180;
+    return [C + r * Math.cos(rad), C + r * Math.sin(rad)] as const;
+  };
+
+  const targetAngle = target != null ? angleFor(target) : null;
+  const showCurrent =
+    current != null && target != null && Math.abs(current - target) >= 1;
+
+  const ticks = [];
+  for (let i = 0; i < TICK_COUNT; i++) {
+    const a = FACE_START + (i / (TICK_COUNT - 1)) * FACE_SWEEP;
+    const lit = targetAngle != null && a <= targetAngle && !off;
+    const major = i % 5 === 0;
+    const [x1, y1] = pt(major ? 88 : 92, a);
+    const [x2, y2] = pt(102, a);
+    ticks.push(
+      <line
+        key={i} x1={x1} y1={y1} x2={x2} y2={y2}
+        stroke={lit ? hue : 'rgba(255,255,255,0.16)'}
+        strokeWidth={major ? 2.6 : 1.8}
+        strokeLinecap="round"
+        opacity={lit && !active ? 0.72 : 1}
+      />
+    );
+  }
+
+  return (
+    <svg viewBox={`0 0 ${S} ${S}`} width="100%" style={{ maxWidth: 250, display: 'block' }}>
+      <defs>
+        <radialGradient id="nestFaceFill" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#0d1116" />
+          <stop offset="62%" stopColor="#0d1116" />
+          <stop offset="100%" stopColor={off ? '#161b22' : hue}
+                stopOpacity={off ? 1 : active ? 0.42 : 0.16} />
+        </radialGradient>
+        <filter id="nestGlow" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur stdDeviation="4" result="b" />
+          <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+        </filter>
+      </defs>
+
+      <circle cx={C} cy={C} r={84} fill="url(#nestFaceFill)" />
+      <circle cx={C} cy={C} r={108} fill="none"
+              stroke="rgba(255,255,255,0.10)" strokeWidth="1" />
+
+      {ticks}
+
+      {showCurrent && current != null && (() => {
+        const a = angleFor(current);
+        const [mx, my] = pt(97, a);
+        const [tx, ty] = pt(70, a);
+        return (
+          <g>
+            <circle cx={mx} cy={my} r={3.4} fill="#fff" opacity={0.9} />
+            <text x={tx} y={ty} fill="rgba(255,255,255,0.66)" fontSize="11"
+                  textAnchor="middle" dominantBaseline="middle">
+              {Math.round(current)}
+            </text>
+          </g>
+        );
+      })()}
+
+      {targetAngle != null && !off && (() => {
+        const [x1, y1] = pt(84, targetAngle);
+        const [x2, y2] = pt(106, targetAngle);
+        return (
+          <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={hue} strokeWidth="5"
+                strokeLinecap="round" filter={active ? 'url(#nestGlow)' : undefined} />
+        );
+      })()}
+
+      <text x={C} y={C - 28} textAnchor="middle" fill="rgba(255,255,255,0.45)"
+            fontSize="10.5" letterSpacing="2.4">{capTop.toUpperCase()}</text>
+      <text x={C} y={C + 16} textAnchor="middle"
+            fill={off ? 'rgba(255,255,255,0.45)' : '#fff'}
+            fontSize="62" fontWeight="200">
+        {target != null ? Math.round(target) : '—'}
+        <tspan fontSize="24" dy="-20">{unit}</tspan>
+      </text>
+      <text x={C} y={C + 46} textAnchor="middle" fill="rgba(255,255,255,0.55)"
+            fontSize="12" fontWeight="300">{capBottom}</text>
+    </svg>
+  );
+}
+
+/**
  * The house has two thermostats on two unrelated systems: the Nest (main
  * floor, SDM API) and the alarm.com stat (lower level). Showing one and
  * hiding the other was how they got conflated in the first place, so the
@@ -1432,13 +1549,14 @@ function ClimateDial({ hass }: { hass: Hass }) {
   };
   const endDrag = () => { dragRef.current = null; };
 
-  const accent = off ? T.faint : cooling ? T.info : T.gold;
-  // The ring tracks the TARGET, not ambient - otherwise dragging moves the
-  // number but not the dial, which is exactly the "can't tell it's updating"
-  // problem.
-  const ringPct = shownTarget != null
-    ? ((shownTarget - loT) / (hiT - loT)) * 100
-    : 0;
+  // Literal hue for the dial face so it matches the Lovelace card exactly.
+  const hue = off
+    ? NEST_HUE.off
+    : /heating/i.test(action ?? '') || clim?.state === 'heat'
+      ? NEST_HUE.heating
+      : cooling
+        ? NEST_HUE.cooling
+        : NEST_HUE.idle;
   const sending = draft != null;
 
   const stepBtn = (delta: number, path: string, label: string) => (
@@ -1473,27 +1591,22 @@ function ClimateDial({ hass }: { hass: Hass }) {
           cursor: off ? 'default' : 'ns-resize',
         }}
       >
-        <Ring pct={ringPct} color={accent}>
-          <div>
-            <div style={{
-              fontSize: 10.5, letterSpacing: '0.16em', textTransform: 'uppercase',
-              color: sending ? accent : T.faint,
-            }}>
-              {off ? 'Off' : sending ? 'Setting' : 'Target'}
-            </div>
-            <div style={{
-              fontSize: 58, fontWeight: 200, lineHeight: 1.05,
-              color: off ? T.dim : sending ? accent : T.text,
-              transition: 'color .2s',
-            }}>
-              {shownTarget != null ? Math.round(shownTarget) : '—'}°
-            </div>
-            <div style={{ fontSize: 13, color: T.dim, marginTop: 6, fontWeight: 300 }}>
-              Now {current != null ? Math.round(current) : '—'}°
-              {humidity != null ? ` · ${Math.round(humidity)}% RH` : ''}
-            </div>
-          </div>
-        </Ring>
+        <NestFace
+          target={shownTarget ?? null}
+          current={current ?? null}
+          lo={loT}
+          hi={hiT}
+          hue={hue}
+          active={!!action && /heating|cooling/i.test(action)}
+          off={off}
+          unit="°"
+          capTop={off ? 'Off' : sending ? 'Setting' : 'Target'}
+          capBottom={
+            current != null
+              ? `Now ${Math.round(current)}°${humidity != null ? ` · ${Math.round(humidity)}% RH` : ''}`
+              : ''
+          }
+        />
       </div>
 
       {/* Reserved line so the panel never reflows when a message appears. */}
