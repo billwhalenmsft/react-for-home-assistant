@@ -6,7 +6,7 @@ import type { Hass } from '../ha/types';
  * Smooth bezier areas with gradient fills; endpoint dots carry live values.
  */
 
-interface Series { entity: string; label: string; color: string }
+export interface Series { entity: string; label: string; color: string }
 
 const SERIES: Series[] = [
   { entity: 'sensor.blink_kitchen_dining_temperature', label: 'Kitchen', color: '#d3b06e' },
@@ -28,8 +28,12 @@ function smoothPath(pts: Point[], sx: (t: number) => number, sy: (v: number) => 
 }
 
 export function HousePulse({ hass }: { hass: Hass }) {
+  return <PulseChart hass={hass} series={SERIES} />;
+}
+
+export function PulseChart({ hass, series }: { hass: Hass; series: Series[] }) {
   const [data, setData] = useState<Record<string, Point[]> | null>(null);
-  const ids = useMemo(() => SERIES.map((s) => s.entity), []);
+  const ids = useMemo(() => series.map((s) => s.entity), []);
 
   useEffect(() => {
     let alive = true;
@@ -81,7 +85,7 @@ export function HousePulse({ hass }: { hass: Hass }) {
     content = (
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img" aria-label="24 hour temperatures">
         <defs>
-          {SERIES.map((s) => (
+          {series.map((s) => (
             <linearGradient key={s.entity} id={`pg-${s.label}`} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={s.color} stopOpacity="0.35" />
               <stop offset="100%" stopColor={s.color} stopOpacity="0" />
@@ -92,7 +96,7 @@ export function HousePulse({ hass }: { hass: Hass }) {
           <line key={f} x1={PAD} x2={W - PAD} y1={26 + f * (H - 56)} y2={26 + f * (H - 56)}
             stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
         ))}
-        {SERIES.map((s) => {
+        {series.map((s) => {
           const pts = data[s.entity] ?? [];
           if (pts.length < 2) return null;
           const line = smoothPath(pts, sx, sy);
@@ -126,7 +130,7 @@ export function HousePulse({ hass }: { hass: Hass }) {
     <div>
       {content}
       <div style={{ display: 'flex', gap: 18, marginTop: 6, flexWrap: 'wrap' }}>
-        {SERIES.map((s) => (
+        {series.map((s) => (
           <span key={s.entity} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 11.5, color: 'rgba(240,237,230,0.65)' }}>
             <span style={{ width: 16, height: 3, borderRadius: 2, background: s.color }} />
             {s.label === 'LivingRoom' ? 'Living Room' : s.label}

@@ -5,7 +5,7 @@ import type { Hass, HassEntity } from '../ha/types';
 import { Floorplan } from './floorplan';
 import { RoomsGrid } from './RoomsGrid';
 import { THEME_CSS } from './theme';
-import { HousePulse, ForecastStrip } from './pulse';
+import { HousePulse, PulseChart, ForecastStrip } from './pulse';
 import { IssMap, type IssState } from './skymap';
 import {
   SunArc, ambientWash, solarTimes, distanceMiles, utcMinutesToLocal, geomagneticLatitude,
@@ -336,8 +336,13 @@ const E = {
     'binary_sensor.aerostream_h19_connected',
     'binary_sensor.drip_irrigation_a10_connected',
   ],
-  plantA: { name: 'input_text.smcc_plant_a_name', planted: 'input_datetime.smcc_plant_a_planted' },
-  plantB: { name: 'input_text.smcc_plant_b_name', planted: 'input_datetime.smcc_plant_b_planted' },
+  plantA: { name: 'input_text.smcc_plant_a_name', planted: 'input_datetime.smcc_plant_a_planted', stage: 'input_select.smcc_plant_a_stage' },
+  plantB: { name: 'input_text.smcc_plant_b_name', planted: 'input_datetime.smcc_plant_b_planted', stage: 'input_select.smcc_plant_b_stage' },
+  growLight: 'light.growhub_e42a_grow_light',
+  ductFan: 'fan.growhub_e42a_duct_fan',
+  circFan: 'fan.growhub_e42a_circulation_fan',
+  humidifier: 'humidifier.aerostream_h19_humidifier',
+  lightPlan: 'sensor.growhub_e42a_plan_light_schedule',
   moon: 'sensor.moon_phase',
   moonEmoji: 'sensor.moon_emoji',
   aurora: 'sensor.aurora_visibility_visibility',
@@ -1663,7 +1668,8 @@ function daysSince(e: HassEntity | undefined): number | undefined {
 function GrowPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const ids = useMemo(() => [
     E.soil, E.soilBatt, E.tentTemp, E.tentHum, E.tentVpd, E.water, E.stage,
-    E.plantA.name, E.plantA.planted, E.plantB.name, E.plantB.planted, ...E.growOnline,
+    E.plantA.name, E.plantA.planted, E.plantA.stage,
+    E.plantB.name, E.plantB.planted, E.plantB.stage, ...E.growOnline,
   ], []);
   const e = useEntities(hass, ids);
   const soil = num(e[E.soil]);
@@ -1720,6 +1726,13 @@ function GrowPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
       {([['🍌', E.plantA], ['🫐', E.plantB]] as const).map(([emoji, plant]) => {
         const day = daysSince(e[plant.planted]);
         const pct = day != null ? Math.min(100, (day / 75) * 100) : 0;
+        const stageEnt = e[plant.stage];
+        const options = (attr(stageEnt, 'options') as string[] | undefined) ?? [];
+        const stageIdx = options.indexOf(stageEnt?.state ?? '');
+        const setStage = (delta: number) => {
+          const next = options[stageIdx + delta];
+          if (next) void hass.callService('input_select', 'select_option', { option: next }, { entity_id: plant.stage });
+        };
         return (
           <Glass key={plant.name}>
             <PanelHead label={`${emoji} ${e[plant.name]?.state ?? 'Plant'}`} />
@@ -1735,17 +1748,115 @@ function GrowPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
                 {day != null ? `${Math.max(0, 75 - day)} days to harvest window` : 'set planted date'}
               </div>
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14 }}>
+              <button type="button" aria-label="Previous stage" onClick={() => setStage(-1)}
+                disabled={stageIdx <= 0}
+                style={{ width: 30, height: 30, borderRadius: 10, border: `1px solid ${T.line}`, background: 'rgba(255,255,255,0.05)', color: T.dim, cursor: 'pointer', fontFamily: 'inherit' }}>‹</button>
+              <span style={{ flex: 1, textAlign: 'center', fontSize: 12.5, letterSpacing: '0.1em', textTransform: 'uppercase', color: T.gold, fontWeight: 600 }}>
+                {stageEnt?.state ? titleize(stageEnt.state) : '—'}
+              </span>
+              <button type="button" aria-label="Next stage" onClick={() => setStage(1)}
+                disabled={stageIdx < 0 || stageIdx >= options.length - 1}
+                style={{ width: 30, height: 30, borderRadius: 10, border: `1px solid ${T.line}`, background: 'rgba(255,255,255,0.05)', color: T.dim, cursor: 'pointer', fontFamily: 'inherit' }}>›</button>
+            </div>
           </Glass>
         );
       })}
 
-      <Glass style={{ display: 'grid', placeItems: 'center', minHeight: 140 }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 13, color: T.dim, marginBottom: 10 }}>Full mission control lives on the SMCC board</div>
-          <Pill tone="gold" onClick={() => { window.location.href = '/grow-tent'; }}>Enter the Grow Room</Pill>
-        </div>
+      <GrowVpdCoach hass={hass} />
+
+      <Glass span={narrow ? 1 : 2}>
+        <PanelHead label="Grow Pulse — 24h" right={<span style={{ fontSize: 11.5, color: T.dim }}>soil &amp; humidity share the % scale</span>} />
+        <PulseChart hass={hass} series={[
+          { entity: E.soil, label: 'Soil', color: '#7ac48f' },
+          { entity: E.tentHum, label: 'TentRH', color: '#7fd1c8' },
+        ]} />
       </Glass>
+
+      <GrowControls hass={hass} />
+
     </div>
+  );
+}
+
+/** Stage-aware VPD verdict — same bands the SMCC coach used. */
+function GrowVpdCoach({ hass }: { hass: Hass }) {
+  const ids = useMemo(() => [E.tentVpd, E.plantA.stage], []);
+  const e = useEntities(hass, ids);
+  const vpd = num(e[E.tentVpd]);
+  const stage = e[E.plantA.stage]?.state ?? '';
+  const BANDS: Record<string, [number, number]> = {
+    germination: [0.4, 0.8], seedling: [0.4, 0.8], 'early veg': [0.8, 1.0],
+    'late veg': [1.0, 1.25], flowering: [1.2, 1.6], flushing: [1.2, 1.6],
+  };
+  const band = BANDS[stage.toLowerCase().replace(/_/g, ' ')] ?? [0.8, 1.2];
+  const low = vpd < band[0], high = vpd > band[1];
+  const ok = !low && !high && Number.isFinite(vpd);
+
+  return (
+    <Glass>
+      <PanelHead label="VPD Coach" />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <Ring pct={Math.min(100, (vpd / 2) * 100)} size={96} stroke={5} color={ok ? T.ok : T.warn}>
+          <div>
+            <div style={{ fontSize: 22, fontWeight: 300 }}>{Number.isFinite(vpd) ? vpd.toFixed(2) : '—'}</div>
+            <div style={{ fontSize: 8.5, color: T.dim, letterSpacing: '0.14em' }}>kPa</div>
+          </div>
+        </Ring>
+        <div style={{ fontSize: 12.5, lineHeight: 1.6 }}>
+          <div style={{ color: ok ? T.ok : T.warn, fontWeight: 600 }}>
+            {ok ? 'Dialed in' : low ? 'Too low — nudge RH down or temp up' : 'Too high — raise humidity'}
+          </div>
+          <div style={{ color: T.dim, marginTop: 3 }}>
+            Target for {titleize(stage)}: {band[0]}–{band[1]} kPa
+          </div>
+        </div>
+      </div>
+    </Glass>
+  );
+}
+
+/** Tent hardware — safe direct toggles; the guard is for security actions only. */
+function GrowControls({ hass }: { hass: Hass }) {
+  const ids = useMemo(() => [E.growLight, E.ductFan, E.circFan, E.humidifier, E.lightPlan, E.water], []);
+  const e = useEntities(hass, ids);
+  const waterWarn = attr(e[E.humidifier], 'water_warning') === true;
+
+  const item = (id: string, name: string, domain: string, icon: string) => {
+    const on = e[id]?.state === 'on';
+    return (
+      <button key={id} type="button" className="est-lift"
+        aria-pressed={on} aria-label={`Toggle ${name}`}
+        onClick={() => void hass.callService(domain, 'toggle', {}, { entity_id: id })}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderRadius: 14,
+          cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, textAlign: 'left',
+          border: `1px solid ${on ? T.goldDeep : T.line}`,
+          background: on ? 'rgba(211,176,110,0.16)' : 'rgba(255,255,255,0.04)',
+          color: on ? T.gold : T.dim,
+        }}
+      >
+        <Icon d={icon} size={17} /> {name}
+        <span style={{ marginLeft: 'auto', fontSize: 10.5, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{on ? 'On' : 'Off'}</span>
+      </button>
+    );
+  };
+
+  return (
+    <Glass>
+      <PanelHead label="Tent hardware" right={<span style={{ fontSize: 11, color: T.dim }}>{e[E.lightPlan]?.state ?? ''}</span>} />
+      <div style={{ display: 'grid', gap: 9 }}>
+        {item(E.growLight, 'Grow Light', 'light', P.bulb)}
+        {item(E.ductFan, 'Exhaust Fan', 'fan', P.power)}
+        {item(E.circFan, 'Circulation Fan', 'fan', P.power)}
+        {item(E.humidifier, 'Humidifier', 'humidifier', P.power)}
+      </div>
+      {waterWarn && (
+        <div style={{ marginTop: 12, fontSize: 12, color: T.warn }}>
+          ⚠ Unit reports a water warning — it will refuse to run until the float is happy.
+        </div>
+      )}
+    </Glass>
   );
 }
 
