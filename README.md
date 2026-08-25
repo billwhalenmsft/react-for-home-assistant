@@ -118,7 +118,7 @@ by this project's logic.
 | **Blink** (cameras/doorbell) | Home Assistant core | Cloud | ✅ Live |
 | **Ecowitt Local** (soil/environment) | [`alexlenk/ecowitt_local`](https://github.com/alexlenk/ecowitt_local) | Local LAN polling | ✅ Live |
 | **VivoSun GrowHub** (tent) | [`lientry/homeassistant-vivosun-growhub`](https://github.com/lientry/homeassistant-vivosun-growhub) | Cloud (vendor API) | ✅ Live |
-| **Z-Wave JS** (Yale lock) | Home Assistant core + USB coordinator | Local (Z-Wave) | 🔧 Planned |
+| **Z-Wave JS** (Yale lock) | Home Assistant core + USB coordinator | Local (Z-Wave) | ✅ Live |
 | **ZHA / Zigbee2MQTT** (Yoolax shades) | Home Assistant core + USB coordinator | Local (Zigbee) | 🔧 In progress |
 | **Contact sensors** | (radio depends on sensor type) | Local | 🔧 Migrating |
 
