@@ -398,12 +398,13 @@ const SCENES: ReadonlyArray<{ label: string; script: string; does: string }> = [
 
 /* ================================================================ shell */
 
-type Page = 'home' | 'rooms' | 'people' | 'cinema' | 'security' | 'grow' | 'sky' | 'settings';
+type Page = 'home' | 'rooms' | 'people' | 'profile' | 'cinema' | 'security' | 'grow' | 'sky' | 'settings';
 
 const NAV: ReadonlyArray<{ id: Page; label: string; icon: string }> = [
   { id: 'home', label: 'Home', icon: P.home },
   { id: 'rooms', label: 'Rooms', icon: P.rooms },
   { id: 'people', label: 'People', icon: P.people },
+  { id: 'profile', label: 'Profile', icon: P.cog },
   { id: 'cinema', label: 'Cinema', icon: P.cinema },
   { id: 'security', label: 'Security', icon: P.shield },
   { id: 'grow', label: 'Grow', icon: P.leaf },
@@ -482,6 +483,7 @@ export function EstateApp({ hass }: { hass: Hass }) {
           {page === 'home' && <HomePage hass={hass} narrow={narrow} go={setPage} />}
           {page === 'rooms' && <RoomsPage hass={hass} narrow={narrow} />}
           {page === 'people' && <PeoplePage hass={hass} narrow={narrow} />}
+          {page === 'profile' && <ProfilePage hass={hass} narrow={narrow} />}
           {page === 'cinema' && <CinemaPage hass={hass} narrow={narrow} />}
           {page === 'security' && <SecurityPage hass={hass} narrow={narrow} />}
           {page === 'grow' && <GrowPage hass={hass} narrow={narrow} />}
@@ -1979,6 +1981,213 @@ function RoomsPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
       </div>
 
       <RoomsGrid hass={hass} narrow={narrow} />
+    </div>
+  );
+}
+
+/**
+ * Per-person settings for whoever is signed in.
+ *
+ * Notification preferences are input_booleans, not frontend user-data: an
+ * automation has to evaluate them at fire time, and Jinja cannot read the
+ * frontend store. The entity id is derived from the signed-in user's first
+ * name (`input_boolean.notif_<first>_<category>`), so adding a family member
+ * is six booleans in packages/profiles.yaml and nothing here changes.
+ *
+ * Locations are Home Assistant zones, which are global rather than per-user —
+ * one shared list of places, and every person's tracker is evaluated against
+ * all of them. That is HA's model, not a choice made here.
+ */
+const NOTIF_CATEGORIES: ReadonlyArray<{ key: string; label: string; blurb: string }> = [
+  { key: 'security', label: 'Security', blurb: 'Doors, garage, lock, motion, night sweep' },
+  { key: 'grow', label: 'Grow tent', blurb: 'Soil, reservoir, VPD, tent hardware' },
+  { key: 'laundry', label: 'Laundry', blurb: 'Washer, dryer, dishwasher' },
+  { key: 'deliveries', label: 'Deliveries', blurb: 'Packages, mail, bins out' },
+  { key: 'sky', label: 'Sky & weather', blurb: 'Storms, aurora, telescope, birds' },
+  { key: 'daily', label: 'Daily brief', blurb: 'The 8:05 morning summary' },
+];
+
+type ZoneRow = { id: string; name: string; latitude: number; longitude: number; radius: number };
+
+function ProfilePage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
+  const who = (hass.user?.name || '').trim().split(/\s+/)[0].toLowerCase();
+  const prefIds = useMemo(
+    () => NOTIF_CATEGORIES.map((c) => 'input_boolean.notif_' + who + '_' + c.key),
+    [who]
+  );
+  const prefs = useEntities(hass, prefIds);
+  const hasPrefs = prefIds.some((id) => prefs[id]);
+
+  const [zones, setZones] = useState<ZoneRow[] | null>(null);
+  const [form, setForm] = useState({ name: '', lat: '', lon: '', radius: '100' });
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const loadZones = () => {
+    hass.connection
+      .sendMessagePromise<ZoneRow[]>({ type: 'zone/list' })
+      .then(setZones)
+      .catch(() => setZones([]));
+  };
+  useEffect(loadZones, []);
+
+  const addZone = () => {
+    const lat = parseFloat(form.lat);
+    const lon = parseFloat(form.lon);
+    const radius = parseInt(form.radius, 10);
+    if (!form.name.trim() || Number.isNaN(lat) || Number.isNaN(lon)) {
+      setMsg('Name, latitude and longitude are all required.');
+      return;
+    }
+    setMsg(null);
+    hass.connection
+      .sendMessagePromise({
+        type: 'zone/create',
+        name: form.name.trim(),
+        latitude: lat,
+        longitude: lon,
+        radius: Number.isNaN(radius) ? 100 : radius,
+        icon: 'mdi:map-marker',
+        passive: false,
+      })
+      .then(() => { setForm({ name: '', lat: '', lon: '', radius: '100' }); loadZones(); })
+      .catch((e) => setMsg('Could not add: ' + String((e as { message?: string })?.message ?? e)));
+  };
+
+  const removeZone = (z: ZoneRow) => {
+    hass.connection
+      .sendMessagePromise({ type: 'zone/delete', zone_id: z.id })
+      .then(loadZones)
+      .catch((e) => setMsg('Could not remove: ' + String((e as { message?: string })?.message ?? e)));
+  };
+
+  const field = (label: string, key: 'name' | 'lat' | 'lon' | 'radius', ph: string, w = 1) => (
+    <label style={{ display: 'grid', gap: 4, gridColumn: 'span ' + w }}>
+      <span style={{ ...LABEL, fontSize: 9.5 }}>{label}</span>
+      <input
+        value={form[key]}
+        placeholder={ph}
+        onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+        style={{
+          font: 'inherit', fontSize: 13, padding: '9px 11px', borderRadius: 10,
+          border: '1px solid ' + T.line, background: 'rgba(255,255,255,0.04)', color: T.text,
+        }}
+      />
+    </label>
+  );
+
+  const cols = narrow ? 1 : 2;
+  return (
+    <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+      <Glass span={cols}>
+        <PanelHead label={'Signed in as ' + (hass.user?.name || 'unknown')} />
+        <p style={{ margin: 0, fontSize: 13, color: T.dim, fontWeight: 300 }}>
+          These settings follow your Home Assistant account, not this device.
+          Someone else signing in here sees their own.
+        </p>
+      </Glass>
+
+      <Glass>
+        <PanelHead label="Notifications" />
+        {!hasPrefs ? (
+          <p style={{ margin: 0, fontSize: 13, color: T.dim, fontWeight: 300 }}>
+            No preferences exist for this account yet. Add the six
+            {' '}notif_{who || 'name'}_* booleans in packages/profiles.yaml.
+          </p>
+        ) : (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {NOTIF_CATEGORIES.map((c) => {
+              const id = 'input_boolean.notif_' + who + '_' + c.key;
+              const on = prefs[id]?.state === 'on';
+              const missing = !prefs[id];
+              return (
+                <button
+                  key={c.key} type="button" disabled={missing}
+                  onClick={() => void hass.callService('input_boolean', 'toggle', {}, { entity_id: id })}
+                  aria-pressed={on}
+                  style={{
+                    font: 'inherit', textAlign: 'left', cursor: missing ? 'default' : 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '11px 14px', borderRadius: 12,
+                    border: '1px solid ' + (on ? T.ok : T.line),
+                    background: on ? 'rgba(95,208,138,0.07)' : 'transparent',
+                    opacity: missing ? 0.45 : 1, color: T.text,
+                  }}
+                >
+                  <span aria-hidden="true" style={{
+                    width: 34, height: 20, borderRadius: 999, flex: 'none',
+                    background: on ? T.ok : 'rgba(255,255,255,0.14)',
+                    position: 'relative', transition: 'background .18s',
+                  }}>
+                    <span style={{
+                      position: 'absolute', top: 3, left: on ? 17 : 3,
+                      width: 14, height: 14, borderRadius: 999, background: '#fff',
+                      transition: 'left .18s',
+                    }} />
+                  </span>
+                  <span style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>{c.label}</div>
+                    <div style={{ fontSize: 11.5, color: T.dim, marginTop: 1 }}>{c.blurb}</div>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </Glass>
+
+      <Glass>
+        <PanelHead label="Locations" />
+        <p style={{ margin: '0 0 12px', fontSize: 12.5, color: T.dim, fontWeight: 300 }}>
+          Places the house recognises — work, school, a friend's. Zones are
+          shared by the household: every phone is checked against every zone.
+        </p>
+        <div style={{ display: 'grid', gap: 8, marginBottom: 14 }}>
+          {zones === null ? (
+            <span style={{ fontSize: 13, color: T.dim }}>Loading…</span>
+          ) : zones.length === 0 ? (
+            <span style={{ fontSize: 13, color: T.dim }}>No editable zones yet.</span>
+          ) : zones.map((z) => (
+            <div key={z.id} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '10px 12px', borderRadius: 12, border: '1px solid ' + T.line,
+            }}>
+              <span style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>{z.name}</div>
+                <div style={{ fontSize: 11, color: T.dim }}>
+                  {z.latitude.toFixed(4)}, {z.longitude.toFixed(4)} · {z.radius} m
+                </div>
+              </span>
+              <button
+                type="button" onClick={() => removeZone(z)} aria-label={'Remove ' + z.name}
+                style={{
+                  font: 'inherit', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase',
+                  padding: '5px 10px', borderRadius: 999, cursor: 'pointer',
+                  border: '1px solid ' + T.line, background: 'transparent', color: T.dim,
+                }}
+              >Remove</button>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(2, minmax(0,1fr))' }}>
+          {field('Name', 'name', 'School', 2)}
+          {field('Latitude', 'lat', '44.7209')}
+          {field('Longitude', 'lon', '-93.3822')}
+          {field('Radius (m)', 'radius', '100', 2)}
+        </div>
+        {msg ? <p style={{ margin: '10px 0 0', fontSize: 12.5, color: T.warn }}>{msg}</p> : null}
+        <button
+          type="button" onClick={addZone}
+          style={{
+            marginTop: 12, font: 'inherit', fontSize: 12.5, fontWeight: 600,
+            padding: '10px 18px', borderRadius: 999, cursor: 'pointer',
+            border: 'none', background: T.gold, color: T.onAccent,
+          }}
+        >Add location</button>
+        <p style={{ margin: '10px 0 0', fontSize: 11, color: T.faint }}>
+          Tip: right-click a spot in Google Maps and copy the coordinates.
+        </p>
+      </Glass>
     </div>
   );
 }
