@@ -1,4 +1,4 @@
-# 🌱 Basement Grow Tent + Home Automation Stack
+# Home Automation Stack
 
 A self-hosted [Home Assistant](https://www.home-assistant.io/) setup that unifies an
 indoor grow tent, environmental sensors, security, and whole-home automation under one
