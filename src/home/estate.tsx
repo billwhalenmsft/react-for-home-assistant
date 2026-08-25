@@ -119,6 +119,19 @@ const GLOBAL_CSS = `
 .est-lift:hover { transform: translateY(-2px); }
 .est-pulse { animation: estBreathe 2.6s ease-in-out infinite; }
 .est-sheet { animation: estSheetUp .22s cubic-bezier(.2,.7,.3,1) both; }
+/* Small controls read fine on a desktop and are a coin-flip under a thumb.
+   On touch devices only, grow the HIT area without touching the layout: the
+   pseudo-element is invisible, sits centred on the control, and never moves
+   anything around it. Guarded by pointer:coarse so two adjacent links on a
+   mouse-driven screen cannot start stealing each other's clicks. */
+@media (pointer: coarse) {
+  .est-tap { position: relative; }
+  .est-tap::after {
+    content: ''; position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    width: 100%; height: 100%; min-width: 44px; min-height: 44px;
+  }
+}
 .est-working { background-image: linear-gradient(90deg, transparent, ${T.gold}, transparent); background-size: 55% 100%; background-repeat: no-repeat; animation: estSweep 1.1s linear infinite; }
 .est-range { -webkit-appearance: none; appearance: none; height: 34px; background: transparent; width: 100%; cursor: pointer; }
 .est-range::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(90deg, ${T.gold} var(--fill,50%), rgba(255,255,255,0.12) var(--fill,50%)); }
@@ -1097,6 +1110,7 @@ function FavoritesPanel({ hass, span, narrow }: { hass: Hass; span: number; narr
           <button
             type="button"
             onClick={() => setEditing((v) => !v)}
+            className="est-tap"
             aria-pressed={editing}
             style={{
               font: 'inherit', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
@@ -1398,7 +1412,7 @@ function WeatherPanel({ hass }: { hass: Hass }) {
 function MoreLink({ onClick }: { onClick?: () => void }) {
   if (!onClick) return null;
   return (
-    <button type="button" onClick={onClick} style={{
+    <button type="button" onClick={onClick} className="est-tap" style={{
       background: 'none', border: 'none', color: T.gold, fontSize: 11.5, cursor: 'pointer',
       letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600, padding: 0,
     }}>Open →</button>
@@ -1673,9 +1687,10 @@ function ClimateDial({ hass }: { hass: Hass }) {
         type="button"
         onClick={() => setZi(i)}
         aria-pressed={on}
+        className="est-tap"
         style={{
           font: 'inherit', fontSize: 10.5, letterSpacing: '0.1em', textTransform: 'uppercase',
-          padding: '4px 9px', borderRadius: 999, cursor: 'pointer',
+          padding: '6px 11px', borderRadius: 999, cursor: 'pointer',
           border: `1px solid ${on ? T.gold : 'transparent'}`,
           background: 'transparent', color: on ? T.gold : T.faint,
         }}
@@ -2469,13 +2484,15 @@ function GrowPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14 }}>
               <button type="button" aria-label="Previous stage" onClick={() => setStage(-1)}
                 disabled={stageIdx <= 0}
-                style={{ width: 30, height: 30, borderRadius: 10, border: `1px solid ${T.line}`, background: 'rgba(255,255,255,0.05)', color: T.dim, cursor: 'pointer', fontFamily: 'inherit' }}>‹</button>
+                className="est-tap"
+                style={{ width: 34, height: 34, borderRadius: 10, border: `1px solid ${T.line}`, background: 'rgba(255,255,255,0.05)', color: T.dim, cursor: 'pointer', fontFamily: 'inherit' }}>‹</button>
               <span style={{ flex: 1, textAlign: 'center', fontSize: 12.5, letterSpacing: '0.1em', textTransform: 'uppercase', color: T.gold, fontWeight: 600 }}>
                 {stageEnt?.state ? titleize(stageEnt.state) : '—'}
               </span>
               <button type="button" aria-label="Next stage" onClick={() => setStage(1)}
                 disabled={stageIdx < 0 || stageIdx >= options.length - 1}
-                style={{ width: 30, height: 30, borderRadius: 10, border: `1px solid ${T.line}`, background: 'rgba(255,255,255,0.05)', color: T.dim, cursor: 'pointer', fontFamily: 'inherit' }}>›</button>
+                className="est-tap"
+                style={{ width: 34, height: 34, borderRadius: 10, border: `1px solid ${T.line}`, background: 'rgba(255,255,255,0.05)', color: T.dim, cursor: 'pointer', fontFamily: 'inherit' }}>›</button>
             </div>
           </Glass>
         );
