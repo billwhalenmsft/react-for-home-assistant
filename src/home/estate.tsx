@@ -15,9 +15,14 @@ import {
   SunArc, ambientWash, solarTimes, distanceMiles, utcMinutesToLocal, geomagneticLatitude,
 } from './celestial';
 import { PeopleGrid, FAMILY } from './people';
+import { HOUSE } from '../house';
+import type { Scene } from '../house';
 
 /**
- * WHALEN ESTATE — a Savant/Control4-class surface for Home Assistant.
+ * THE ESTATE PANEL — a Savant/Control4-class surface for Home Assistant.
+ *
+ * Nothing in this file names a specific home: every entity id, person and
+ * room comes from the house config (../house). See src/house/sample.ts.
  *
  * Design language: deep graphite ground, glass panels, hairline borders,
  * champagne-gold accent, thin display type, generous negative space. One
@@ -80,6 +85,8 @@ const P = {
   tv: 'M21 3H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5v2h8v-2h5a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 14H3V5h18v12z',
   people: 'M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z',
   game: 'M21 6H3a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zM11 13H8v3H6v-3H3v-2h3V8h2v3h3v2zm4.5 2a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm4-3a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z',
+  person: 'M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v3h16v-3c0-2.76-3.58-5-8-5z',
+  more: 'M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
   cog: 'M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z',
 };
 
@@ -104,12 +111,14 @@ const GLOBAL_CSS = `
 @keyframes estFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes estBreathe { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
 @keyframes estSweep { 0% { background-position: -150% 0; } 100% { background-position: 250% 0; } }
+@keyframes estSheetUp { from { transform: translateY(14px); opacity: 0; } to { transform: none; opacity: 1; } }
 .est-page { animation: estFadeUp .45s cubic-bezier(.2,.7,.3,1) both; }
 .est-panel { transition: border-color .25s ease, transform .25s ease, background .25s ease; }
 .est-panel:hover { border-color: ${T.lineHi}; }
 .est-lift { transition: transform .2s ease, border-color .2s ease, background .2s ease; }
 .est-lift:hover { transform: translateY(-2px); }
 .est-pulse { animation: estBreathe 2.6s ease-in-out infinite; }
+.est-sheet { animation: estSheetUp .22s cubic-bezier(.2,.7,.3,1) both; }
 .est-working { background-image: linear-gradient(90deg, transparent, ${T.gold}, transparent); background-size: 55% 100%; background-repeat: no-repeat; animation: estSweep 1.1s linear infinite; }
 .est-range { -webkit-appearance: none; appearance: none; height: 34px; background: transparent; width: 100%; cursor: pointer; }
 .est-range::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(90deg, ${T.gold} var(--fill,50%), rgba(255,255,255,0.12) var(--fill,50%)); }
@@ -118,7 +127,7 @@ const GLOBAL_CSS = `
 .est-range::-moz-range-progress { height: 4px; border-radius: 2px; background: ${T.gold}; }
 .est-range::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: ${T.goldHi}; border: 2px solid #2a251c; }
 @media (prefers-reduced-motion: reduce) {
-  .est-page, .est-pulse, .est-working { animation: none; }
+  .est-page, .est-pulse, .est-working, .est-sheet { animation: none; }
   .est-panel, .est-lift { transition: none; }
 }
 `;
@@ -252,114 +261,8 @@ const titleize = (s?: string) => (s ?? '—').replace(/_/g, ' ').replace(/\b\w/g
 
 /* =============================================================== entity map */
 
-const E = {
-  headline: 'sensor.house_headline',
-  weather: 'weather.forecast_home',
-  sun: 'sun.sun',
-  person: 'device_tracker.bills_iphone_17',
-  phoneBatt: 'sensor.iphone_battery_level',
-  phone: 'device_tracker.bills_iphone_17',
-  blink: 'alarm_control_panel.blink_indoor',
-  panel: 'alarm_control_panel.panel',
-  lock: 'lock.yale_front_door',
-  // Both bays now run local ratgdo boards. cover.garage / cover.garage_door_2 are
-  // alarm.com mirrors of these same two doors: they lag ~90 s behind reality, never
-  // report the opening/closing transitions, and disappear with the subscription.
-  garage1: 'cover.garage_main_garage_stall_door', // 16'x8' double
-  garage2: 'cover.garage_single_door',            //  8'x8' single
-  doors: [
-    ['Front Door', 'binary_sensor.front_door'],
-    ['Dining Slider', 'binary_sensor.dining_sliding_door'],
-    ['Lower Slider', 'binary_sensor.lower_sliding_door'],
-    ['Garage Entry', 'binary_sensor.garage_entry_door'],
-  ] as const,
-  motion: 'binary_sensor.lower_motion_motion',
-  // --- sky lab (packages/sky_lab.yaml) ---------------------------------
-  homeZone: 'zone.home',
-  issPos: 'sensor.iss_position',
-  issPassSummary: 'sensor.iss_pass_summary',
-  issPassDir: 'sensor.iss_pass_direction',
-  kp: 'sensor.planetary_k_index',
-  apod: 'sensor.nasa_picture_of_the_day',
-  auroraVerdict: 'sensor.aurora_verdict',
-  nextLaunch: 'sensor.next_launch',
-  nextLaunchName: 'sensor.next_launch_name',
-  nextLaunchDetail: 'sensor.next_launch_detail',
-  nextLaunchCountdown: 'sensor.next_launch_countdown',
-  nextSpacex: 'sensor.next_spacex_launch',
-  nextSpacexMission: 'sensor.next_spacex_mission',
-  nextSpacexCountdown: 'sensor.next_spacex_countdown',
-  epicImage: 'sensor.nasa_earth_image',
-  epicWhen: 'sensor.nasa_earth_captured',
-  laundryWasherFlag: 'input_boolean.washer_needs_unloading',
-  laundryDryerFlag: 'input_boolean.dryer_needs_unloading',
-  // Two thermostats, two zones, two different systems - do not conflate them.
-  // `climate` is the alarm.com stat in the lower level; `climateNest` is the
-  // 3rd-gen Nest on the main floor (Great Room <-> Entry wall), live on the
-  // SDM API since 2026-08-23.
-  climate: 'climate.family_room',
-  climateNest: 'climate.family_room_family_room',
-  allLights: 'light.main_floor_all_lights',
-  rooms: [
-    { name: 'Kitchen', light: 'light.kitchen_all_lights', temp: 'sensor.blink_kitchen_dining_temperature' },
-    { name: 'Living Room', light: 'light.living_room_living_room_main_lights', temp: 'sensor.blink_living_room_temperature' },
-    { name: 'Dining', light: 'light.dining_room_dining_room_chandelier', temp: undefined },
-    { name: 'Entry', light: 'light.entry_lights', temp: undefined },
-  ],
-  fixtures: [
-    ['Island', 'light.kitchen_kitchen_island_lights'],
-    ['Pendants', 'light.kitchen_kitchen_island_pendants'],
-    ['Living Room', 'light.living_room_living_room_main_lights'],
-    ['Chandelier', 'light.dining_room_dining_room_chandelier'],
-    ['Foyer', 'light.front_foyer_front_foyer_main_lights'],
-    ['Mudroom', 'light.mudroom_mudroom_main_lights'],
-  ] as const,
-  autopilotHue: 'switch.kitchen_hue_adaptive_lighting_kitchen_hue',
-  autopilotDim: 'switch.lutron_dimmers_adaptive_lighting_lutron_dimmers',
-  frame: 'media_player.samsung_the_frame_65_qn65ls03aafxza',
-  marantz: 'media_player.marantz_sr6011',
-  sonos: [
-    ['Family Room', 'media_player.family_room_family_room'],
-    ['Bedroom', 'media_player.bedroom_bedroom'],
-    ["Rowan's Room", 'media_player.rowans_room_speaker'],
-  ] as const,
-  cams: [
-    ['Front Door', 'camera.front_door'],
-    ['Front Porch', 'camera.front_porch'],
-    ['Wyoming Ave', 'camera.wyoming_ave'],
-    ['Living Room', 'camera.living_room'],
-    ['Cat Room', 'camera.cat_room'],
-    ['Kitchen / Dining', 'camera.kitchen_dining'],
-    // camera.unknown ("Outdoor 3 - C9WQ") stays off the wall at Bill's request.
-  ] as const,
-  soil: 'sensor.ecowitt_soil_moisture_f3621',
-  soilBatt: 'sensor.ecowitt_soil_moisture_battery_f3621',
-  tentTemp: 'sensor.growhub_e42a_inside_temperature',
-  tentHum: 'sensor.growhub_e42a_inside_humidity',
-  tentVpd: 'sensor.growhub_e42a_inside_vpd',
-  water: 'sensor.aerostream_h19_water_level',
-  stage: 'sensor.growhub_e42a_grow_plan_stage',
-  growOnline: [
-    'binary_sensor.ecowitt_soil_moisture_f3621_online',
-    'binary_sensor.ecowitt_gateway_gw1100b_online',
-    'binary_sensor.growhub_e42a_connected',
-    'binary_sensor.aerostream_h19_connected',
-    'binary_sensor.drip_irrigation_a10_connected',
-  ],
-  plantA: { name: 'input_text.smcc_plant_a_name', planted: 'input_datetime.smcc_plant_a_planted', stage: 'input_select.smcc_plant_a_stage' },
-  plantB: { name: 'input_text.smcc_plant_b_name', planted: 'input_datetime.smcc_plant_b_planted', stage: 'input_select.smcc_plant_b_stage' },
-  growLight: 'light.growhub_e42a_grow_light',
-  ductFan: 'fan.growhub_e42a_duct_fan',
-  circFan: 'fan.growhub_e42a_circulation_fan',
-  humidifier: 'humidifier.aerostream_h19_humidifier',
-  lightPlan: 'sensor.growhub_e42a_plan_light_schedule',
-  moon: 'sensor.moon_phase',
-  moonEmoji: 'sensor.moon_emoji',
-  aurora: 'sensor.aurora_visibility_visibility',
-  waste: 'sensor.waste_upcoming',
-  washer: 'sensor.laundry_room_washer_machine_state',
-  dryer: 'sensor.laundry_room_dryer_machine_state',
-};
+const E = HOUSE.entities;
+
 
 /**
  * Scenes, each carrying a plain description of what it will actually do.
@@ -369,47 +272,35 @@ const E = {
  * it trains you to click through without reading. If a script changes, this
  * text has to change with it.
  */
-const SCENES: ReadonlyArray<{ label: string; script: string; does: string }> = [
-  {
-    label: 'Movie Time', script: 'script.whalen_movie_time',
-    does: 'Drops the Lutron lights to the movie scene and dims the kitchen Hue to match.',
-  },
-  {
-    label: 'All On', script: 'script.whalen_all_lights_on',
-    does: 'Turns on every Lutron light and sets the main-floor Hue to natural light.',
-  },
-  {
-    label: 'All Off', script: 'script.whalen_all_lights_off',
-    does: 'Turns off every Lutron light and the entire main-floor Hue group.',
-  },
-  {
-    label: 'Half On', script: 'script.whalen_half_on',
-    does: 'Lutron to its half-on scene, main-floor Hue to 40%.',
-  },
-  {
-    label: 'Goodnight', script: 'script.whalen_goodnight',
-    does: 'Puts Adaptive Lighting into sleep mode, turns every light off, and shuts down the Frame TV and the Marantz.',
-  },
-  {
-    label: 'Good Morning', script: 'script.whalen_morning_wake',
-    does: 'Leaves sleep mode, disarms the indoor Blink cameras, and brings the main floor up to the energize scene.',
-  },
-];
+const SCENES: ReadonlyArray<Scene> = HOUSE.scenes;
+
 
 /* ================================================================ shell */
 
 type Page = 'home' | 'rooms' | 'people' | 'profile' | 'cinema' | 'security' | 'grow' | 'sky' | 'settings';
 
-const NAV: ReadonlyArray<{ id: Page; label: string; icon: string }> = [
-  { id: 'home', label: 'Home', icon: P.home },
-  { id: 'rooms', label: 'Rooms', icon: P.rooms },
+type NavItem = { id: Page; label: string; icon: string; primary?: boolean; adminOnly?: boolean };
+
+/**
+ * `primary` marks the four destinations the phone bar shows directly. Nine
+ * tabs across a 390px screen gave every one of them ~43px, which crushed the
+ * labels and pushed Profile and Setup into the corner where they could not be
+ * read or reliably tapped. Everything without the flag lives one tap deeper in
+ * the More sheet; the wide rail still shows all of them at once.
+ *
+ * `adminOnly` keeps house-wide dials off non-admin phones entirely, rather
+ * than showing a tab that leads to a page explaining they cannot use it.
+ */
+const NAV: ReadonlyArray<NavItem> = [
+  { id: 'home', label: 'Home', icon: P.home, primary: true },
+  { id: 'rooms', label: 'Rooms', icon: P.rooms, primary: true },
+  { id: 'security', label: 'Security', icon: P.shield, primary: true },
+  { id: 'grow', label: 'Grow', icon: P.leaf, primary: true },
   { id: 'people', label: 'People', icon: P.people },
-  { id: 'profile', label: 'Profile', icon: P.cog },
   { id: 'cinema', label: 'Cinema', icon: P.cinema },
-  { id: 'security', label: 'Security', icon: P.shield },
-  { id: 'grow', label: 'Grow', icon: P.leaf },
   { id: 'sky', label: 'Sky', icon: P.sky },
-  { id: 'settings', label: 'Setup', icon: P.cog },
+  { id: 'profile', label: 'Profile', icon: P.person },
+  { id: 'settings', label: 'Setup', icon: P.cog, adminOnly: true },
 ];
 
 /**
@@ -426,6 +317,7 @@ function pageFromHash(): Page {
 }
 
 export function EstateApp({ hass }: { hass: Hass }) {
+  const admin = hass.user?.is_admin === true;
   const [page, setPageState] = useState<Page>(pageFromHash);
   const narrow = useNarrow();
 
@@ -471,7 +363,7 @@ export function EstateApp({ hass }: { hass: Hass }) {
 
       <AmbientLayer hass={hass} />
 
-      {!narrow && <Rail page={page} setPage={setPage} />}
+      {!narrow && <Rail page={page} setPage={setPage} admin={admin} />}
 
       <main style={{
         flex: 1, minWidth: 0, padding: narrow ? '20px 16px 96px' : '30px 38px 48px',
@@ -492,12 +384,13 @@ export function EstateApp({ hass }: { hass: Hass }) {
         </div>
       </main>
 
-      {narrow && <BottomBar page={page} setPage={setPage} />}
+      {narrow && <BottomBar page={page} setPage={setPage} admin={admin} />}
     </div>
   );
 }
 
-function Rail({ page, setPage }: { page: Page; setPage: (p: Page) => void }) {
+function Rail({ page, setPage, admin }: { page: Page; setPage: (p: Page) => void; admin: boolean }) {
+  const items = NAV.filter((n) => admin || !n.adminOnly);
   return (
     <nav aria-label="Sections" style={{
       width: 86, flex: 'none', borderRight: `1px solid ${T.line}`,
@@ -509,8 +402,8 @@ function Rail({ page, setPage }: { page: Page; setPage: (p: Page) => void }) {
         background: `linear-gradient(160deg, ${T.gold}, ${T.goldDeep})`, color: T.onAccent,
         fontWeight: 800, fontSize: 17, letterSpacing: '-0.02em', marginBottom: 18,
         boxShadow: '0 6px 24px rgba(211,176,110,0.3)',
-      }}>W</div>
-      {NAV.map((n) => {
+      }}>{HOUSE.name.slice(0, 1).toUpperCase()}</div>
+      {items.map((n) => {
         const active = n.id === page;
         return (
           <button
@@ -536,32 +429,121 @@ function Rail({ page, setPage }: { page: Page; setPage: (p: Page) => void }) {
   );
 }
 
-function BottomBar({ page, setPage }: { page: Page; setPage: (p: Page) => void }) {
+function BottomBar({ page, setPage, admin }: {
+  page: Page; setPage: (p: Page) => void; admin: boolean;
+}) {
+  const [more, setMore] = useState(false);
+  const items = NAV.filter((n) => admin || !n.adminOnly);
+  const primary = items.filter((n) => n.primary);
+  const rest = items.filter((n) => !n.primary);
+  const restActive = rest.some((n) => n.id === page);
+
+  // Escape closes the sheet, and so does landing on a page: tapping a
+  // destination should leave you looking at it, not at the menu.
+  useEffect(() => {
+    if (!more) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMore(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [more]);
+
+  const tab = (n: NavItem | 'more') => {
+    const isMore = n === 'more';
+    const active = isMore ? restActive && !more : (n as NavItem).id === page;
+    const label = isMore ? 'More' : (n as NavItem).label;
+    const icon = isMore ? P.more : (n as NavItem).icon;
+    return (
+      <button
+        key={isMore ? 'more' : (n as NavItem).id}
+        type="button"
+        onClick={() => { if (isMore) { setMore((v) => !v); } else { setMore(false); setPage((n as NavItem).id); } }}
+        aria-label={label}
+        aria-current={active ? 'page' : undefined}
+        aria-expanded={isMore ? more : undefined}
+        style={{
+          // flex:1 + minWidth:0 keeps five tabs evenly spread on a 320px phone
+          // instead of overflowing the way space-around did with nine.
+          flex: 1, minWidth: 0,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          color: active || (isMore && more) ? T.gold : T.dim, padding: '4px 2px',
+        }}
+      >
+        <Icon d={icon} size={22} />
+        <span style={{
+          fontSize: 9.5, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase',
+          maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{label}</span>
+      </button>
+    );
+  };
+
   return (
-    <nav aria-label="Sections" style={{
-      position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 40,
-      display: 'flex', justifyContent: 'space-around',
-      padding: '10px 8px calc(10px + env(safe-area-inset-bottom))',
-      background: 'rgba(10,12,14,0.82)', backdropFilter: 'blur(22px)', WebkitBackdropFilter: 'blur(22px)',
-      borderTop: `1px solid ${T.line}`,
-    }}>
-      {NAV.map((n) => {
-        const active = n.id === page;
-        return (
-          <button
-            key={n.id} type="button" onClick={() => setPage(n.id)} aria-label={n.label}
+    <>
+      {more ? (
+        <div
+          onClick={() => setMore(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 39,
+            background: 'rgba(6,8,10,0.55)', backdropFilter: 'blur(3px)',
+          }}
+        >
+          <nav
+            aria-label="More sections"
+            onClick={(e) => e.stopPropagation()}
+            className="est-sheet"
             style={{
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-              background: 'transparent', border: 'none', cursor: 'pointer',
-              color: active ? T.gold : T.dim, padding: '2px 10px',
+              position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 41,
+              padding: '14px 14px calc(94px + env(safe-area-inset-bottom))',
+              background: 'rgba(14,17,20,0.96)',
+              backdropFilter: 'blur(22px)', WebkitBackdropFilter: 'blur(22px)',
+              borderTop: `1px solid ${T.lineHi}`,
+              borderRadius: `${T.radius} ${T.radius} 0 0`,
+              display: 'grid', gap: 8,
             }}
           >
-            <Icon d={n.icon} size={22} />
-            <span style={{ fontSize: 9, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{n.label}</span>
-          </button>
-        );
-      })}
-    </nav>
+            <div style={{
+              width: 38, height: 4, borderRadius: 999, background: T.line,
+              margin: '0 auto 6px',
+            }} />
+            {rest.map((n) => {
+              const active = n.id === page;
+              return (
+                <button
+                  key={n.id} type="button"
+                  onClick={() => { setMore(false); setPage(n.id); }}
+                  aria-current={active ? 'page' : undefined}
+                  style={{
+                    font: 'inherit', textAlign: 'left', cursor: 'pointer',
+                    // 54px tall: a real thumb target, which is the whole point
+                    // of moving these out of a nine-across bar.
+                    display: 'flex', alignItems: 'center', gap: 14, minHeight: 54,
+                    padding: '0 16px', borderRadius: 14,
+                    border: `1px solid ${active ? T.lineHi : T.line}`,
+                    background: active ? T.glassHi : 'transparent',
+                    color: active ? T.gold : T.text,
+                  }}
+                >
+                  <Icon d={n.icon} size={22} />
+                  <span style={{ fontSize: 15, fontWeight: 500 }}>{n.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+      ) : null}
+
+      <nav aria-label="Sections" style={{
+        position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 40,
+        display: 'flex', alignItems: 'stretch',
+        padding: '10px 4px calc(10px + env(safe-area-inset-bottom))',
+        background: 'rgba(10,12,14,0.82)', backdropFilter: 'blur(22px)', WebkitBackdropFilter: 'blur(22px)',
+        borderTop: `1px solid ${T.line}`,
+      }}>
+        {primary.map(tab)}
+        {rest.length > 0 ? tab('more') : null}
+      </nav>
+    </>
   );
 }
 
@@ -603,7 +585,7 @@ function Masthead({ hass, narrow }: { hass: Hass; narrow: boolean }) {
     <header style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 20, justifyContent: 'space-between' }}>
       <div>
         <div style={{ ...LABEL, marginBottom: 8 }}>
-          Whalen Estate · {now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+          {HOUSE.name} · {now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
           <span style={{
@@ -1354,7 +1336,7 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
           ))}
           <span style={{ flex: 1 }} />
           <FirePill
-            hass={hass} script="script.whalen_lockup" label="Lockup" tone="gold" big icon={P.lock}
+            hass={hass} script={HOUSE.lockupScript} label="Lockup" tone="gold" big icon={P.lock}
             confirm="Locks the Yale, closes both garage doors, and turns every light off."
           />
         </div>
@@ -2060,15 +2042,18 @@ function ProfilePage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
       .catch((e) => setMsg('Could not remove: ' + String((e as { message?: string })?.message ?? e)));
   };
 
+  const formCols = narrow ? 1 : 2;
   const field = (label: string, key: 'name' | 'lat' | 'lon' | 'radius', ph: string, w = 1) => (
-    <label style={{ display: 'grid', gap: 4, gridColumn: 'span ' + w }}>
+    <label style={{ display: 'grid', gap: 4, gridColumn: 'span ' + Math.min(w, formCols) }}>
       <span style={{ ...LABEL, fontSize: 9.5 }}>{label}</span>
       <input
         value={form[key]}
         placeholder={ph}
         onChange={(e) => setForm({ ...form, [key]: e.target.value })}
         style={{
-          font: 'inherit', fontSize: 13, padding: '9px 11px', borderRadius: 10,
+            // 16px: anything smaller and iOS Safari zooms the whole page in on
+          // focus, which is its own kind of scrunched.
+          font: 'inherit', fontSize: 16, padding: '11px 12px', borderRadius: 10,
           border: '1px solid ' + T.line, background: 'rgba(255,255,255,0.04)', color: T.text,
         }}
       />
@@ -2169,10 +2154,10 @@ function ProfilePage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
           ))}
         </div>
 
-        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(2, minmax(0,1fr))' }}>
+        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: `repeat(${formCols}, minmax(0,1fr))` }}>
           {field('Name', 'name', 'School', 2)}
-          {field('Latitude', 'lat', '44.7209')}
-          {field('Longitude', 'lon', '-93.3822')}
+          {field('Latitude', 'lat', HOUSE.sampleCoords.lat)}
+          {field('Longitude', 'lon', HOUSE.sampleCoords.lon)}
           {field('Radius (m)', 'radius', '100', 2)}
         </div>
         {msg ? <p style={{ margin: '10px 0 0', fontSize: 12.5, color: T.warn }}>{msg}</p> : null}
@@ -3044,39 +3029,13 @@ function SettingsPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const cols = narrow ? 1 : 2;
   const admin = hass.user?.is_admin === true;
 
-  /* Non-admins get a personal profile page, never the house dials. House
-     thresholds/schedules are global facts — one soil alert level for the whole
-     tent — so only administrators shape them. Personal alert subscriptions
-     (which pushes each person receives, quiet hours) land here per-person as
-     family members connect their companion apps. */
-  if (!admin) {
-    return (
-      <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
-        <Glass span={cols}>
-          <PanelHead label="My profile" />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <div style={{
-              width: 56, height: 56, borderRadius: 18, display: 'grid', placeItems: 'center',
-              background: `linear-gradient(160deg, ${T.gold}, ${T.goldDeep})`, color: '#191408',
-              fontWeight: 800, fontSize: 22,
-            }}>{(hass.user?.name ?? '?').slice(0, 1).toUpperCase()}</div>
-            <div>
-              <div style={{ fontSize: 19, fontWeight: 400 }}>{hass.user?.name ?? 'Guest'}</div>
-              <div style={{ fontSize: 12.5, color: T.dim, marginTop: 3 }}>Member of the Whalen Estate</div>
-            </div>
-          </div>
-        </Glass>
-        <Glass span={cols}>
-          <PanelHead label="Personal alerts" />
-          <div style={{ fontSize: 13.5, color: T.dim, lineHeight: 1.7 }}>
-            Once your phone runs the Home Assistant companion app, this page grows your
-            personal switches: which alerts reach <i>you</i> (security, laundry, sky…),
-            and your quiet hours. House-wide settings are managed by the administrator.
-          </div>
-        </Glass>
-      </div>
-    );
-  }
+  /* Non-admins never get the house dials: thresholds and schedules are global
+     facts -- one soil alert level for the whole tent -- so only administrators
+     shape them. They get the real Profile page instead of a placeholder, which
+     is where their own alert switches and locations already live. Setup is
+     hidden from their nav entirely; this branch only catches a stale link or a
+     notification deep-link to #settings. */
+  if (!admin) return <ProfilePage hass={hass} narrow={narrow} />;
 
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>

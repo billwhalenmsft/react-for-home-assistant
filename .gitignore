@@ -3,3 +3,15 @@ dist/
 *.local
 .DS_Store
 *.tsbuildinfo
+
+# --- this house, not the project -----------------------------------------
+# The real config: entity ids, the roster, the floorplan of an actual home.
+# src/house/sample.ts is what ships; local.ts is what runs here.
+src/house/local.ts
+# Emitted by the floorplan tooling from a real drawing.
+src/home/plan.generated.ts
+# A dump of one Home Assistant's live states, for the offline harness.
+harness-states.js
+# Rendered floorplans of a real building.
+fp_main.png
+local/

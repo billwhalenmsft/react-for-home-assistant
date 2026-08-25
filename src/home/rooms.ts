@@ -1,3 +1,5 @@
+import { HOUSE } from '../house';
+import type { RoomDevices } from '../house';
 /**
  * What lives in each room.
  *
@@ -11,103 +13,11 @@
  * plan, not an oversight.
  */
 
-export interface RoomDevices {
-  /** entity ids, in the order they should appear */
-  entities: string[];
-  /** optional note shown under the room name */
-  note?: string;
-}
+export type { RoomDevices };
 
-export const ROOM_DEVICES: Record<string, Record<string, RoomDevices>> = {
-  fp_main: {
-    'Great Room': {
-      entities: [
-        'light.living_room_living_room_main_lights',
-        'media_player.samsung_the_frame_65',
-        'media_player.marantz_sr6011',
-        'binary_sensor.living_room_motion',
-      ],
-      note: '4 recessed cans · 5.1 in-ceiling + sub',
-    },
-    Kitchen: {
-      entities: [
-        'light.kitchen_all_lights',
-        'light.kitchen_kitchen_island_lights',
-        'light.kitchen_kitchen_island_pendants',
-        'light.kitchen_kitchen_above_cabinets_left',
-        'light.kitchen_kitchen_above_cabinet_right',
-        'light.kitchen_right_kitchen_under_cabinet',
-        'light.kitchen_left_lower_kitchen_cabinet',
-        'binary_sensor.kitchen_dining_motion',
-      ],
-      note: 'Hue cabinet strips + Caséta island',
-    },
-    Dining: {
-      entities: ['light.dining_room_dining_room_chandelier', 'binary_sensor.dining_sliding_door'],
-    },
-    Entry: {
-      entities: [
-        'light.front_foyer_front_foyer_main_lights',
-        'lock.yale_front_door',
-        'binary_sensor.front_door',
-        // Nest 3rd-gen sits on the Great Room <-> Entry wall. The lower-level
-        // stat (climate.family_room) is a different device on alarm.com.
-        'climate.family_room_family_room',
-      ],
-    },
-    Mud: {
-      entities: ['light.mudroom_mudroom_main_lights', 'binary_sensor.garage_entry_door'],
-    },
-    'Single Bay': {
-      entities: [
-        'cover.garage_single_door',
-        'light.garage_single_light',
-        'lock.garage_single_remotes',
-        'binary_sensor.garage_single_obstruction',
-        'binary_sensor.garage_single_motion',
-      ],
-      note: "8'x8' bay — ratgdo, local control",
-    },
-    'Double Bay': {
-      entities: [
-        'cover.garage_main_garage_stall_door',
-        'light.garage_main_garage_stall_light',
-        'lock.garage_main_garage_stall_lock_remotes',
-        'binary_sensor.garage_main_garage_stall_obstruction',
-        'binary_sensor.garage_main_garage_stall_motion',
-      ],
-      note: "16'x8' bay — ratgdo, local control",
-    },
-    Porch: {
-      entities: ['binary_sensor.front_porch_motion'],
-    },
-    Study: { entities: [], note: 'No smart lighting — Cat 6 + TV drop only' },
-  },
 
-  fp_upper: {
-    Laundry: {
-      entities: ['sensor.laundry_room_washer_machine_state', 'sensor.laundry_room_dryer_machine_state'],
-    },
-    'Master Bedroom': { entities: ['media_player.bedroom_bedroom'] },
-    'Bedroom 2': { entities: [], note: 'SW 6225 Sleepy Blue' },
-    'Bedroom 3': { entities: [], note: 'SW 6743 Mint Condition' },
-    'Bedroom 4': { entities: [], note: 'SW 6486 Reflecting Pool' },
-  },
+export const ROOM_DEVICES: Record<string, Record<string, RoomDevices>> = HOUSE.rooms;
 
-  fp_lower: {
-    'Family Room': {
-      entities: ['media_player.family_room_family_room', 'climate.family_room'],
-    },
-    Mechanical: {
-      entities: ['alarm_control_panel.panel'],
-      note: 'Structured wiring hub · alarm panel',
-    },
-    Bedroom: { entities: ['binary_sensor.lower_motion_motion', 'binary_sensor.lower_sliding_door'] },
-  },
-};
 
-export const FLOOR_TABS: Array<{ key: string; label: string }> = [
-  { key: 'fp_main', label: 'Main' },
-  { key: 'fp_upper', label: 'Upper' },
-  { key: 'fp_lower', label: 'Lower' },
-];
+export const FLOOR_TABS: Array<{ key: string; label: string }> = HOUSE.floorTabs;
+

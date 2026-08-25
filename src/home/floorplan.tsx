@@ -1,7 +1,10 @@
 import { useMemo, useState, type CSSProperties } from 'react';
 import { useEntities } from '../ha/useEntities';
 import type { Hass } from '../ha/types';
-import { FLOORS, PLAN_W, PLAN_H, MATERIAL_COLORS, type PlanRoom } from './plan.generated';
+import { HOUSE } from '../house';
+import type { PlanRoom } from '../house';
+
+const { floors: FLOORS, width: PLAN_W, height: PLAN_H, materialColors: MATERIAL_COLORS } = HOUSE.plan;
 import { ROOM_DEVICES, FLOOR_TABS } from './rooms';
 import { RoomPanel } from './RoomPanel';
 
@@ -305,7 +308,7 @@ export function Floorplan({ hass, floor, onSelectRoom, height = '100%' }: Floorp
         {/* front-of-house marker and compass */}
         <g style={{ pointerEvents: 'none' }}>
           <text x={PLAN_W / 2} y={PLAN_H - 28} textAnchor="middle" fontSize={26} fill="var(--wt-dim)">
-            FRONT · Wyoming Ave
+            FRONT · {HOUSE.street}
           </text>
           <polygon
             points={`${PLAN_W / 2 - 11},${PLAN_H - 20} ${PLAN_W / 2 + 11},${PLAN_H - 20} ${PLAN_W / 2},${PLAN_H - 4}`}

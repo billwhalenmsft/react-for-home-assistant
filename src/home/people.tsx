@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import { useEntities } from '../ha/useEntities';
 import type { Hass } from '../ha/types';
+import { HOUSE } from '../house';
+import type { Person } from '../house';
 
 /**
  * The family, and how much of them Home Assistant can actually see.
@@ -17,22 +19,11 @@ import type { Hass } from '../ha/types';
  * stays in HA proper.
  */
 
-export type Person = {
-  id: string;
-  name: string;
-  /** Companion-app battery sensor, once that person has the app installed. */
-  battery?: string;
-  note?: string;
-};
+export type { Person };
 
-export const FAMILY: ReadonlyArray<Person> = [
-  { id: 'person.wiljr0k5', name: 'Bill', battery: 'sensor.iphone_battery_level' },
-  { id: 'person.erin', name: 'Erin', battery: 'sensor.erins_iphone_17_pro_max_battery_level' },
-  { id: 'person.isaiah', name: 'Isaiah', note: 'St Paul' },
-  { id: 'person.rowan', name: 'Rowan' },
-  { id: 'person.alex', name: 'Alex' },
-  { id: 'person.silas', name: 'Silas' },
-];
+
+export const FAMILY: ReadonlyArray<Person> = HOUSE.family;
+
 
 type Presence = { label: string; tone: string; known: boolean };
 
