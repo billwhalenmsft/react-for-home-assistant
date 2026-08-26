@@ -5,6 +5,7 @@ import { ROOM_DEVICES } from './rooms';
 import { HOUSE } from '../house';
 import { GarageControl } from './GarageControl';
 import { ACTIONABLE, EntityControl, isOn, nameOf, rendersAsSquare, useControlStyle } from './Controls';
+import { DiffuserBlock, diffusersFor } from './Scent';
 
 /**
  * One room, everything in it, all at once.
@@ -70,7 +71,7 @@ export function RoomPanel({
 
       {isGarage ? (
         <GarageControl hass={hass} {...GARAGE[room]} />
-      ) : ids.length === 0 ? (
+      ) : ids.length === 0 && !spec?.scentDiffusers?.length ? (
         <div style={S.empty}>Nothing wired in this room yet.</div>
       ) : (
         <>
@@ -94,6 +95,12 @@ export function RoomPanel({
           ) : (
             <div style={S.empty}>Nothing here to operate — only readings.</div>
           )}
+
+          {spec?.scentDiffusers?.length ? (
+            <div style={S.scent}>
+              <DiffuserBlock hass={hass} diffusers={diffusersFor(spec.scentDiffusers)} size="card" />
+            </div>
+          ) : null}
 
           {readouts.length ? (
             <div style={S.readouts}>
@@ -147,6 +154,7 @@ const S: Record<string, CSSProperties> = {
     padding: '11px 12px', borderRadius: 14, minWidth: 0,
     background: 'var(--wt-glass)', border: '1px solid var(--wt-line)',
   },
+  scent: { marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--wt-line)' },
   readouts: { display: 'grid', gap: 6, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--wt-line)' },
   readout: { display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 9, minWidth: 0 },
   readoutName: {

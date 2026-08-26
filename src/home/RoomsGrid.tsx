@@ -6,6 +6,7 @@ import { HOUSE } from '../house';
 import type { PlanRoom } from '../house';
 import { ROOM_DEVICES } from './rooms';
 import { ACTIONABLE, EntityControl, rendersAsSquare, useControlStyle } from './Controls';
+import { DiffuserBlock, diffusersFor } from './Scent';
 
 const { floors: FLOORS, materialColors: MATERIAL_COLORS } = HOUSE.plan;
 import { RoomPanel } from './RoomPanel';
@@ -40,6 +41,8 @@ interface Tile {
   entities: string[];
   /** the up-to-three surfaced on the card itself */
   favorites: string[];
+  /** names of diffusers in this room, from the house config */
+  scent: string[];
   note?: string;
 }
 
@@ -67,7 +70,10 @@ export function RoomsGrid({ hass, narrow }: { hass: Hass; narrow: boolean }) {
         if (!spec || spec.entities.length === 0) continue;
         if (spec.hideFromRooms) continue;
         const usable = spec.entities.filter((id) => ACTIONABLE.has(id.split('.')[0]));
-        if (usable.length === 0) continue;
+        const scent = spec.scentDiffusers ?? [];
+        // A diffuser counts. It has an intensity you can set, so a room that
+        // holds one is a place you can do something — which is the whole test.
+        if (usable.length === 0 && scent.length === 0) continue;
         // What you reach for in this room, straight on the card. The house
         // config gets first say; absent that, the first three things you can
         // actually operate — which for every room here is the right answer.
@@ -75,7 +81,7 @@ export function RoomsGrid({ hass, narrow }: { hass: Hass; narrow: boolean }) {
         // again, just with a photo behind it.
         const favorites = (spec.favorites?.filter((id) => usable.includes(id)) ?? usable).slice(0, 3);
         out.push({
-          floor, room, entities: spec.entities, favorites, note: spec.note,
+          floor, room, entities: spec.entities, favorites, scent, note: spec.note,
           order: spec.order ?? DEFAULT_ORDER,
         });
       }
@@ -151,7 +157,7 @@ export function RoomsGrid({ hass, narrow }: { hass: Hass; narrow: boolean }) {
                 {lit ? <span style={S.dot} /> : null}
               </button>
 
-              {t.favorites.length ? (
+              {t.favorites.length || t.scent.length ? (
                 <div style={ctrl === 'square' ? { ...S.strip, ...S.stripSquare } : S.strip}>
                   {t.favorites.map((id) => (
                     <div
@@ -165,6 +171,12 @@ export function RoomsGrid({ hass, narrow }: { hass: Hass; narrow: boolean }) {
                       <EntityControl hass={hass} id={id} s={states[id]} size="tile" style={ctrl} />
                     </div>
                   ))}
+                  {t.scent.length ? (
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <DiffuserBlock hass={hass} diffusers={diffusersFor(t.scent)} size="tile" />
+                    </div>
+                  ) : null}
+
                   {/*
                     Always rendered, even when nothing is hidden. Two reasons:
                     it is a real target (it opens the room), and it is the row

@@ -48,6 +48,14 @@ export interface RoomDevices {
    */
   order?: number;
   /**
+   * Names of scent diffusers in this room, matching `scent.diffusers[].name`.
+   *
+   * A room with a diffuser earns a tile on its own, even with no other
+   * controls -- the diffuser has an intensity you can set, which is a control
+   * like any other. Two diffusers in one room is allowed and shows both.
+   */
+  scentDiffusers?: string[];
+  /**
    * Up to three entity ids to surface directly on the room's tile, so the
    * gesture you make every day costs no taps at all. Anything left out is
    * still reachable — opening the room shows everything it has. Defaults to

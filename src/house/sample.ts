@@ -186,6 +186,7 @@ export const SAMPLE_HOUSE: HouseConfig = {
         // Most-used room, so it leads the Rooms page. Anything without an
         // `order` follows in floorplan order.
         order: 0,
+        scentDiffusers: ['Living Room'],
         entities: [
           'light.living_room_lights',
           'media_player.living_room_tv',
@@ -209,6 +210,7 @@ export const SAMPLE_HOUSE: HouseConfig = {
         entities: ['light.dining_room_chandelier', 'binary_sensor.patio_door'],
       },
       Entry: {
+        scentDiffusers: ['Entry'],
         entities: ['light.foyer_lights', 'lock.front_door', 'binary_sensor.front_door'],
       },
       Garage: {
@@ -260,6 +262,10 @@ export const SAMPLE_HOUSE: HouseConfig = {
 
   // Scent diffusers. Delete this whole block if your house has none -- the
   // Rooms page simply omits the panel when `scent` is absent.
+  //
+  // Name each one in its room's `scentDiffusers` too. A diffuser that no room
+  // claims is reachable nowhere: the levels live on room cards, and the panel
+  // below is only a house-wide refill summary.
   scent: {
     lowest: 'sensor.diffuser_lowest_bottle',
     needsRefill: 'binary_sensor.diffuser_needs_refill',

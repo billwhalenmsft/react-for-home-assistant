@@ -1951,49 +1951,27 @@ function SkySummary({ hass, onMore }: { hass: Hass; onMore?: () => void }) {
  * freely reversible, so it acts immediately with no confirm — matching how
  * lights and switches behave everywhere else in this panel.
  */
-function BottleBar({ label, pct }: { label: string; pct: number }) {
-  const known = Number.isFinite(pct);
-  const tone = !known ? T.faint : pct < 15 ? T.alert : pct < 30 ? T.warn : T.ok;
-  return (
-    <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, minWidth: 0 }}>
-        <span style={{
-          fontSize: 11.5, color: T.dim, whiteSpace: 'nowrap',
-          overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0,
-        }}>{label}</span>
-        <span style={{ fontSize: 11.5, fontWeight: 700, color: tone, flex: 'none' }}>
-          {known ? `${Math.round(pct)}%` : '—'}
-        </span>
-      </div>
-      <div style={{ height: 5, borderRadius: 999, background: 'rgba(255,255,255,0.09)', overflow: 'hidden' }}>
-        <div style={{
-          width: `${known ? Math.max(2, Math.min(100, pct)) : 0}%`, height: '100%',
-          background: tone, borderRadius: 999, transition: 'width .3s ease',
-        }} />
-      </div>
-    </div>
-  );
-}
 
-function ScentPanel({ hass, narrow }: { hass: Hass; narrow: boolean }) {
+function ScentPanel({ hass }: { hass: Hass }) {
   const scent = HOUSE.scent;
   const ids = useMemo(() => {
     if (!scent) return [];
     const out = [scent.lowest, scent.needsRefill, scent.refills];
-    for (const d of scent.diffusers) {
-      out.push(d.connected, d.active, d.intensity);
-      for (const s of d.slots) out.push(s.fragrance, s.remaining);
-    }
+    // Only the slot levels — enough to count what is low house-wide. The
+    // per-diffuser detail lives on the room cards now.
+    for (const d of scent.diffusers) for (const sl of d.slots) out.push(sl.remaining);
     return out;
   }, [scent]);
   const e = useEntities(hass, ids);
   if (!scent) return null;
 
   const lowCount = scent.diffusers.reduce((n, d) =>
-    n + d.slots.filter((s) => {
-      const v = num(e[s.remaining], NaN);
+    n + d.slots.filter((sl) => {
+      const v = num(e[sl.remaining], NaN);
       return Number.isFinite(v) && v < 15;
     }).length, 0);
+
+  const lowest = e[scent.lowest]?.state;
 
   return (
     <Glass>
@@ -2005,76 +1983,12 @@ function ScentPanel({ hass, narrow }: { hass: Hass; narrow: boolean }) {
           </span>
         }
       />
-      <div style={{
-        display: 'grid', gap: 10,
-        gridTemplateColumns: narrow ? '1fr' : 'repeat(auto-fill, minmax(250px, 1fr))',
-      }}>
-        {scent.diffusers.map((d) => {
-          const online = e[d.connected]?.state === 'on';
-          const activeRaw = e[d.active]?.state;
-          const active = !activeRaw || ['none', 'unknown', 'unavailable'].includes(activeRaw)
-            ? null : activeRaw;
-          const intensity = e[d.intensity]?.state ?? 'off';
-          const steps = (attr(e[d.intensity], 'options') as string[] | undefined)
-            ?? ['off', 'subtle', 'medium', 'strong'];
-          return (
-            <div key={d.name} style={{
-              border: `1px solid ${T.line}`, borderRadius: 14, padding: '12px 14px',
-              display: 'grid', gap: 10, minWidth: 0, opacity: online ? 1 : 0.55,
-            }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
-                <span style={{
-                  fontSize: 13.5, fontWeight: 600, minWidth: 0,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>{d.name}</span>
-                <span style={{ flex: 1 }} />
-                <span style={{
-                  fontSize: 11, color: active ? T.gold : T.faint, textAlign: 'right',
-                  minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {online ? (active ?? 'Idle') : 'Offline'}
-                </span>
-              </div>
-
-              <div style={{ display: 'grid', gap: 8 }}>
-                {d.slots.map((s, i) => {
-                  const fr = e[s.fragrance]?.state;
-                  const label = fr && !['unknown', 'unavailable'].includes(fr) ? fr : `Slot ${i + 1}`;
-                  return <BottleBar key={i} label={label} pct={num(e[s.remaining], NaN)} />;
-                })}
-              </div>
-
-              <div style={{ display: 'flex', gap: 4 }} role="group" aria-label={`${d.name} intensity`}>
-                {steps.map((step) => {
-                  const on = intensity === step;
-                  return (
-                    <button
-                      key={step} type="button"
-                      onClick={() => void hass.callService('select', 'select_option',
-                        { option: step }, { entity_id: d.intensity })}
-                      aria-pressed={on}
-                      className="est-tap"
-                      style={{
-                        flex: 1, minWidth: 0, font: 'inherit', fontSize: 10.5,
-                        textTransform: 'uppercase', letterSpacing: '0.04em',
-                        padding: '6px 2px', borderRadius: 8, cursor: 'pointer',
-                        border: `1px solid ${on ? T.gold : T.line}`,
-                        background: on ? 'rgba(211,176,110,0.12)' : 'transparent',
-                        color: on ? T.gold : T.dim,
-                      }}
-                    >{step}</button>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      {lowCount > 0 ? (
-        <p style={{ margin: '12px 0 0', fontSize: 12, color: T.warn }}>
-          Refill: {e[scent.refills]?.state ?? '—'}
-        </p>
-      ) : null}
+      <p style={{ margin: 0, fontSize: 13, color: T.dim, fontWeight: 300, lineHeight: 1.5 }}>
+        {lowCount > 0
+          ? `Lowest bottle ${lowest ?? '—'}%. Refill: ${e[scent.refills]?.state ?? '—'}.`
+          : `Every diffuser has fragrance. Lowest bottle ${lowest ?? '—'}%.`}
+        {' '}Levels and intensity for each diffuser are on its room's card.
+      </p>
     </Glass>
   );
 }
@@ -2127,7 +2041,7 @@ function RoomsPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
 
       <RoomsGrid hass={hass} narrow={narrow} />
 
-      <ScentPanel hass={hass} narrow={narrow} />
+      <ScentPanel hass={hass} />
     </div>
   );
 }

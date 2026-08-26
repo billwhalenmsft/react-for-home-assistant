@@ -24,4 +24,5 @@ export const IS_SAMPLE_HOUSE = local === undefined;
 
 export type {
   HouseConfig, Person, Scene, RoomDevices, PlanRoom, HousePlan, EntityMap,
+  ScentConfig, ScentDiffuser,
 } from './types';
