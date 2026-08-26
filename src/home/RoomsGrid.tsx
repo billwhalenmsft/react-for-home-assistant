@@ -2,8 +2,11 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { useEntities } from '../ha/useEntities';
 import type { Hass } from '../ha/types';
-import { FLOORS, MATERIAL_COLORS, type PlanRoom } from './plan.generated';
+import { HOUSE } from '../house';
+import type { PlanRoom } from '../house';
 import { ROOM_DEVICES } from './rooms';
+
+const { floors: FLOORS, materialColors: MATERIAL_COLORS } = HOUSE.plan;
 import { RoomPanel } from './RoomPanel';
 
 /**
@@ -26,6 +29,12 @@ const rgb = (c: [number, number, number] | undefined, fallback: string) =>
 
 const LIT = new Set(['on', 'open', 'playing', 'run', 'cleaning', 'heat', 'cool']);
 
+/** Domains you can actually do something to from a room tile. */
+const ACTIONABLE = new Set([
+  'light', 'switch', 'cover', 'lock', 'media_player', 'climate',
+  'fan', 'humidifier', 'vacuum', 'scene', 'script', 'select', 'button',
+]);
+
 interface Tile {
   floor: string;
   room: PlanRoom;
@@ -36,7 +45,17 @@ interface Tile {
 export function RoomsGrid({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const [open, setOpen] = useState<{ floor: string; room: string } | null>(null);
 
-  // every room that has something wired, in plan order, main floor first
+  // A tile has to earn its place. Two rules, both deliberate:
+  //
+  //   1. The room must offer something you would actually TOUCH. A room whose
+  //      only contents are read-only sensors is a readout, not a destination —
+  //      it was making the grid look full of rooms that do nothing when tapped.
+  //      This is a rule rather than a list so it maintains itself: wire a light
+  //      into the porch and the porch shows up on its own.
+  //   2. Rooms flagged `hideFromRooms` are controllable but belong to another
+  //      page (garage bays, the alarm panel). See the house config.
+  //
+  // Neither rule touches the floorplan — every room stays on the map.
   const tiles = useMemo<Tile[]>(() => {
     const out: Tile[] = [];
     for (const floor of ['fp_main', 'fp_upper', 'fp_lower']) {
@@ -45,6 +64,9 @@ export function RoomsGrid({ hass, narrow }: { hass: Hass; narrow: boolean }) {
       for (const room of plan.rooms) {
         const spec = ROOM_DEVICES[floor]?.[room.name];
         if (!spec || spec.entities.length === 0) continue;
+        if (spec.hideFromRooms) continue;
+        const actionable = spec.entities.some((id) => ACTIONABLE.has(id.split('.')[0]));
+        if (!actionable) continue;
         out.push({ floor, room, entities: spec.entities, note: spec.note });
       }
     }

@@ -41,6 +41,14 @@ export interface RoomDevices {
   entities: string[];
   /** optional note shown under the room name */
   note?: string;
+  /**
+   * Keep this room off the Rooms grid while leaving it on the floorplan.
+   *
+   * For rooms that are perfectly real and perfectly controllable, but whose
+   * controls belong to another page — garage bays and the alarm panel are
+   * Security's job, and seeing them under "rooms" reads as a filing error.
+   */
+  hideFromRooms?: boolean;
 }
 
 /** One traced room on a floorplan image, in image pixels. */

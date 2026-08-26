@@ -2085,6 +2085,11 @@ function RoomsPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   // system is meant to read. See RoomsGrid.
   return (
     <div style={{ display: 'grid', gap: 18 }}>
+      {/* Favourites first. Whatever you pinned is what you came to touch, and
+          making it wait below a panorama and a room grid put two scrolls
+          between you and the thing you actually wanted. */}
+      <FavoritesPanel hass={hass} span={1} narrow={narrow} />
+
       {/* The grid below is a set of separate boxes, which is exactly what it
           cannot show: that the kitchen, great room and dining are one
           connected space. The panorama says that in a single glance. */}

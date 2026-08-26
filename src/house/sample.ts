@@ -205,6 +205,8 @@ export const SAMPLE_HOUSE: HouseConfig = {
         entities: ['light.foyer_lights', 'lock.front_door', 'binary_sensor.front_door'],
       },
       Garage: {
+        // Controllable, but its controls belong to the Security page.
+        hideFromRooms: true,
         entities: [
           'cover.garage_double_door',
           'cover.garage_single_door',
