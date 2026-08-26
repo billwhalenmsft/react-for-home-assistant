@@ -232,6 +232,36 @@ export const SAMPLE_HOUSE: HouseConfig = {
     { key: 'fp_lower', label: 'Lower' },
   ],
 
+  // Scent diffusers. Delete this whole block if your house has none -- the
+  // Rooms page simply omits the panel when `scent` is absent.
+  scent: {
+    lowest: 'sensor.diffuser_lowest_bottle',
+    needsRefill: 'binary_sensor.diffuser_needs_refill',
+    refills: 'sensor.diffuser_refills_needed',
+    diffusers: [
+      {
+        name: 'Entry',
+        connected: 'binary_sensor.entry_diffuser_connected',
+        active: 'sensor.entry_diffuser_active_fragrance',
+        intensity: 'select.entry_diffuser_intensity',
+        slots: [
+          { fragrance: 'sensor.entry_diffuser_slot_1_fragrance', remaining: 'sensor.entry_diffuser_slot_1_fragrance_remaining' },
+          { fragrance: 'sensor.entry_diffuser_slot_2_fragrance', remaining: 'sensor.entry_diffuser_slot_2_fragrance_remaining' },
+        ],
+      },
+      {
+        name: 'Living Room',
+        connected: 'binary_sensor.living_room_diffuser_connected',
+        active: 'sensor.living_room_diffuser_active_fragrance',
+        intensity: 'select.living_room_diffuser_intensity',
+        slots: [
+          { fragrance: 'sensor.living_room_diffuser_slot_1_fragrance', remaining: 'sensor.living_room_diffuser_slot_1_fragrance_remaining' },
+          { fragrance: 'sensor.living_room_diffuser_slot_2_fragrance', remaining: 'sensor.living_room_diffuser_slot_2_fragrance_remaining' },
+        ],
+      },
+    ],
+  },
+
   /**
    * A deliberately plain sample plan: rectangular floors split into rooms, in
    * the same image-pixel coordinate space the real renderer emits. Replace it

@@ -136,6 +136,28 @@ export interface EntityMap {
   dryer: string;
 }
 
+/** One scent diffuser, and the two bottles in it. */
+export interface ScentDiffuser {
+  /** What to call it on screen. */
+  name: string;
+  connected: string;
+  /** Which fragrance is actually diffusing right now. */
+  active: string;
+  /** `select` entity: off / subtle / medium / strong. */
+  intensity: string;
+  slots: ReadonlyArray<{ fragrance: string; remaining: string }>;
+}
+
+export interface ScentConfig {
+  /** Lowest bottle across the house, as a percentage. */
+  lowest: string;
+  /** True while any bottle is below the refill threshold. */
+  needsRefill: string;
+  /** Human-readable list of which bottles need refilling. */
+  refills: string;
+  diffusers: ReadonlyArray<ScentDiffuser>;
+}
+
 export interface HouseConfig {
   /** Shown in the masthead and used for the rail's monogram. */
   name: string;
@@ -151,5 +173,7 @@ export interface HouseConfig {
   /** floor key -> room name -> what is in it */
   rooms: Record<string, Record<string, RoomDevices>>;
   floorTabs: Array<{ key: string; label: string }>;
+  /** Omit entirely if the house has no scent diffusers. */
+  scent?: ScentConfig;
   plan: HousePlan;
 }
