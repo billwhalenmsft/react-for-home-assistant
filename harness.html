@@ -4,14 +4,34 @@
 <style>html,body{margin:0;background:#0a0c0e;}</style>
 </head>
 <body>
-<script src="./harness-states.js"></script>
+<!-- Sample states ship with the repo so the harness runs on a fresh clone.
+     harness-states.local.js is optional, git-ignored, and wins if present. -->
+<script src="./harness-states.sample.js"></script>
+<script src="./harness-states.local.js" onerror="void 0"></script>
 <script type="module">
-  import './dist/react-for-home-assistant.js?b=1787746493';
+  import './dist/react-for-home-assistant.js?b=1787749024';
 
   const fakeConn = {
+    // home-assistant-js-websocket branches on haVersion to choose between
+    // `subscribe_entities` and the legacy get_states + state_changed path.
+    // Without it the check fails and the subscription silently yields nothing,
+    // which renders as every card being "offline" against a good state file.
+    haVersion: '2026.8.1',
+    connected: true,
     listeners: {},
     addEventListener() {}, removeEventListener() {},
-    subscribeMessage(cb, _msg) { queueMicrotask(() => cb({ a: window.MOCK_ENTITIES })); return Promise.resolve(() => {}); },
+    // Deliver the whole state set as an `a` (add) message, the shape
+    // home-assistant-js-websocket expects from `subscribe_entities`. Repeat it
+    // a couple of times: a single microtask can land before the panel has
+    // finished mounting and subscribing, which leaves every card reading
+    // "offline" against a perfectly good state file.
+    subscribeMessage(cb, _msg) {
+      const send = () => cb({ a: window.MOCK_ENTITIES });
+      queueMicrotask(send);
+      setTimeout(send, 50);
+      setTimeout(send, 400);
+      return Promise.resolve(() => {});
+    },
     subscribeEvents() { return Promise.resolve(() => {}); },
     sendMessagePromise(msg) {
       if (msg.type === 'get_states') {
@@ -33,7 +53,7 @@
   el.setConfig({ type: 'custom:react-home-card', view: 'home' });
   el.hass = {
     states, connection: fakeConn, themes: {}, language: 'en',
-    user: { name: 'Bill', is_admin: true },
+    user: { name: 'Sam', is_admin: true },
     callService: async (d, s, data, target) => console.log('callService', d, s, data, target),
   };
   document.body.appendChild(el);

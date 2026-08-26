@@ -20,8 +20,10 @@ export const SAMPLE_HOUSE: HouseConfig = {
   name: 'Maple Street',
   street: 'Maple Street',
   lockupScript: 'script.lockup',
+  locality: 'Chicago, IL',
   // Placeholder text in the Locations form. A city centre, not anybody's home.
   sampleCoords: { lat: '41.8781', lon: '-87.6298' },
+  coords: { lat: 41.8781, lon: -87.6298 },
 
   family: [
     { id: 'person.sam', name: 'Sam', battery: 'sensor.sams_phone_battery_level' },
@@ -234,6 +236,23 @@ export const SAMPLE_HOUSE: HouseConfig = {
     { key: 'fp_lower', label: 'Lower' },
   ],
 
+  // The Favourites rail: what can be pinned, and what a new user starts with.
+  favourites: {
+    catalog: [
+      { entity: 'lock.front_door', name: 'Front Door', kind: 'lock' },
+      { entity: 'cover.garage_double_door', name: 'Double Bay', kind: 'cover' },
+      { entity: 'cover.garage_single_door', name: 'Single Bay', kind: 'cover' },
+      { entity: 'light.main_floor_all_lights', name: 'Main Floor', kind: 'light' },
+      { entity: 'light.kitchen_all_lights', name: 'Kitchen', kind: 'light' },
+      { entity: 'light.living_room_lights', name: 'Living Room', kind: 'light' },
+      { entity: 'light.dining_room_chandelier', name: 'Chandelier', kind: 'light' },
+      { entity: 'light.foyer_lights', name: 'Foyer', kind: 'light' },
+      { entity: 'light.mudroom_lights', name: 'Mudroom', kind: 'light' },
+      { entity: 'light.kitchen_pendants', name: 'Island Pendants', kind: 'light' },
+    ],
+    defaults: ['light.kitchen_all_lights', 'light.living_room_lights', 'lock.front_door'],
+  },
+
   // Scent diffusers. Delete this whole block if your house has none -- the
   // Rooms page simply omits the panel when `scent` is absent.
   scent: {
@@ -300,6 +319,43 @@ export const SAMPLE_HOUSE: HouseConfig = {
       tile: [138, 142, 148],
       carpet: [108, 104, 116],
       concrete: [96, 99, 103],
+    },
+    // One entity per room decides that room's glow on the plan. Keep it to the
+    // thing you would look across the room to check.
+    roomEntity: {
+      fp_main: {
+        'Living Room': 'light.living_room_lights',
+        Kitchen: 'light.kitchen_all_lights',
+        Dining: 'light.dining_room_chandelier',
+        Entry: 'light.foyer_lights',
+        Garage: 'cover.garage_double_door',
+      },
+      fp_lower: {
+        'Family Room': 'media_player.office_speaker',
+      },
+    },
+    // Overhead doors, drawn across the bottom edge of their bay so an open one
+    // is obvious from across the room rather than being a subtle colour shift.
+    doors: {
+      fp_main: [
+        { room: 'Garage', entity: 'cover.garage_double_door' },
+      ],
+    },
+    beacons: {
+      fp_main: [
+        { entity: 'binary_sensor.living_room_motion', x: 300, y: 260 },
+        { entity: 'binary_sensor.kitchen_motion', x: 790, y: 260 },
+      ],
+    },
+  },
+
+  // Rooms that are garage bays get a door panel rather than service tabs.
+  garageBays: {
+    Garage: {
+      cover: 'cover.garage_double_door',
+      light: 'light.garage_light',
+      lock: 'lock.garage_remotes',
+      obstruction: 'binary_sensor.garage_obstruction',
     },
   },
 };

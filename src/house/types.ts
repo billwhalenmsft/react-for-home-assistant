@@ -61,6 +61,15 @@ export interface PlanRoom {
   paint: [number, number, number] | null;
 }
 
+/** A garage bay's controls, which get a door panel instead of service tabs. */
+export interface GarageBay {
+  cover: string;
+  light?: string;
+  lock?: string;
+  obstruction?: string;
+  openings?: string;
+}
+
 export interface HousePlan {
   /** Natural size of the rendered floorplan images, in pixels. */
   width: number;
@@ -68,6 +77,12 @@ export interface HousePlan {
   pxPerFt: number;
   floors: Record<string, { title: string; rooms: PlanRoom[] }>;
   materialColors: Record<string, [number, number, number]>;
+  /** floor -> room -> the ONE entity whose state colours that room. */
+  roomEntity: Record<string, Record<string, string>>;
+  /** Overhead doors, drawn as a bar across the bottom edge of their bay. */
+  doors: Record<string, Array<{ room: string; entity: string }>>;
+  /** Motion beacons, positioned in plan-image space. */
+  beacons: Record<string, Array<{ entity: string; x: number; y: number }>>;
 }
 
 /** A labelled pair — a display name and the entity behind it. */
@@ -166,15 +181,29 @@ export interface ScentConfig {
   diffusers: ReadonlyArray<ScentDiffuser>;
 }
 
+/** One entity offered on the Favourites rail. */
+export interface Favourite {
+  entity: string;
+  name: string;
+  kind: 'light' | 'switch' | 'lock' | 'cover';
+}
+
 export interface HouseConfig {
   /** Shown in the masthead and used for the rail's monogram. */
   name: string;
   /** The street the front of the house faces, labelled on the floorplan. */
   street: string;
+  /** Town shown under the weather, e.g. "Duluth, MN". */
+  locality: string;
   /** The one script the Lockup button fires. */
   lockupScript: string;
   /** Two example coordinates, used only as placeholder text in the Locations form. */
   sampleCoords: { lat: string; lon: string };
+  /**
+   * Roughly where the house is. Only a fallback: the sky pages read
+   * `zone.home` first and use this when that zone has no position yet.
+   */
+  coords: { lat: number; lon: number };
   family: ReadonlyArray<Person>;
   entities: EntityMap;
   scenes: ReadonlyArray<Scene>;
@@ -183,5 +212,15 @@ export interface HouseConfig {
   floorTabs: Array<{ key: string; label: string }>;
   /** Omit entirely if the house has no scent diffusers. */
   scent?: ScentConfig;
+  /** Everything offerable on the Favourites rail, and what a new user starts with. */
+  favourites: { catalog: ReadonlyArray<Favourite>; defaults: ReadonlyArray<string> };
+  /** Rooms that are garage bays, keyed by room name. */
+  garageBays: Record<string, GarageBay>;
+  /**
+   * Optional wide photo at the top of the Rooms page. Omit it and the block is
+   * not rendered at all -- a missing image collapses the container and drops
+   * its caption onto the room grid.
+   */
+  panorama?: { src: string; label: string; caption: string };
   plan: HousePlan;
 }

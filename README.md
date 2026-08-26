@@ -56,8 +56,8 @@ This repo carries two things:
    │              │              │              │              │              │
 ┌──▼───────┐ ┌────▼─────┐ ┌──────▼──────┐ ┌─────▼─────┐ ┌──────▼─────┐ ┌──────▼─────┐
 │ Contact  │ │ Cameras  │ │  Deadbolt   │ │  Garage   │ │  Shades    │ │ Grow tent  │
-│ sensors  │ │+doorbell │ │  (Z-Wave)   │ │ (ESPHome  │ │  (Zigbee)  │ │ (sensors + │
-│(bridged) │ │ (cloud)  │ │             │ │  on-board)│ │            │ │  control)  │
+│ sensors  │ │+doorbell │ │  (Z-Wave)   │ │ (ESPHome  │ │ (Zigbee +  │ │ (sensors + │
+│(bridged) │ │ (cloud)  │ │             │ │  on-board)│ │  BLE proxy)│ │  control)  │
 └──────────┘ └──────────┘ └─────────────┘ └───────────┘ └────────────┘ └────────────┘
    SECURITY  ◄─────────────────────────────────────────►  COMFORT / CLIMATE / GROW
 ```
@@ -85,6 +85,8 @@ Replacing the paid service, piece by piece:
 | **Entry detection** | Door/window contact sensors | Bridged (vendor) | 🔧 Last piece |
 | **Alarm panel** | Legacy panel, **chime-only by household decision** | Bridged (vendor) | ⏸️ By choice |
 
+![The Security page: lock and both garage bays, the perimeter board, and the camera wall](docs/screenshots/security.jpg)
+
 **What HA does that the subscription didn't:**
 
 - **Conditional alerts** instead of all-or-nothing — notify on doorbell press, suppress
@@ -104,6 +106,8 @@ Replacing the paid service, piece by piece:
 
 ## 🖥️ The Estate panel
 
+![The Home page: favourites, scenes, what needs attention, a live floorplan and the thermostat](docs/screenshots/home.jpg)
+
 A React app registered as a Home Assistant panel — a full-screen surface, not a card. It
 exists because Lovelace's grid stops being the right tool once a dashboard becomes the
 thing the household actually looks at.
@@ -111,7 +115,7 @@ thing the household actually looks at.
 | Page | What it's for |
 |---|---|
 | **Home** | The one-screen answer: who's home, what's unlocked, weather, scenes, favourites |
-| **Rooms** | A live floorplan — tap a room for what's in it |
+| **Rooms** | Favourites, then a tile per room — tap one for what's in it |
 | **Security** | Perimeter board: every door, both garages, the lock, cameras |
 | **Grow** | Tent climate, VPD, soil, per-plant stage tracking |
 | **Sky** | ISS passes, aurora, launches, moon phase, NASA imagery |
@@ -122,6 +126,15 @@ thing the household actually looks at.
 
 Pages are addressable by URL hash (`#security`, `#grow`, …), which is what lets a
 notification deep-link to the page that explains it.
+
+![The Rooms page: favourites on top, then one tile per room, each showing what is on](docs/screenshots/rooms.jpg)
+
+**A room tile has to earn its place.** Rooms whose only contents are read-only sensors are
+readouts, not destinations — tapping one did nothing — so they are filtered out by domain
+rather than by a hand-kept list, and a room reappears on its own the moment you wire
+something controllable into it. Rooms that *are* controllable but belong to another page
+(garage bays, the alarm panel) carry a `hideFromRooms` flag instead. Neither filter touches
+the floorplan: every room stays on the map.
 
 ### Why React, on a platform that isn't
 
@@ -145,6 +158,11 @@ Two hard-won gotchas are worth repeating for anyone building gesture UI here: ke
 state in a `useRef`, not `useState` (a fast drag delivers many pointer events inside one
 React tick, and batched state hands every one the same stale base), and debounce commands
 to cloud APIs — see the thermostat note under Climate.
+
+> **About the screenshots.** Every one is the **sample house** — invented rooms, invented
+> people, invented entity ids — captured from the offline harness described below. None of
+> them show a real home's devices, family or floorplan, which is the same reason the
+> committed config is sample data.
 
 ### The house config — and why nothing here names a real device
 
@@ -172,7 +190,7 @@ card by card rather than failing whole.
 | **Thermostat (main floor)** | Smart thermostat over the vendor's device API | Cloud (OAuth) | ✅ Live |
 | **Thermostat (lower level)** | Legacy stat | Bridged (vendor) | 🔧 Migrating |
 | **Lighting** | Wired dimmers + smart bulbs, with adaptive colour/brightness | Local | ✅ Live |
-| **Motorized shades** | Zigbee shades | Local (Zigbee) | 🔧 In progress |
+| **Motorized shades** | Yoolax — three Bluetooth (Tuya BLE), four Zigbee | Local (both) | 🔧 In progress |
 
 Two notes worth stealing:
 
@@ -183,7 +201,8 @@ Two notes worth stealing:
   stepper earns a `429` in seconds. Both thermostat surfaces in this project hold a local
   draft and send only the settled value after a ~900 ms quiet period.
 
-See the [Zigbee shades spotlight](#-spotlight-zigbee-shades) below.
+See the [Yoolax shades spotlight](#-spotlight-yoolax-shades--bluetooth-and-zigbee) below —
+the same product line ships on two different radios, and it matters.
 
 ---
 
@@ -201,6 +220,8 @@ One of the rooms this stack watches is an indoor grow tent — a good stress-tes
 | **Tent climate + device control** | Tent controller, humidifier, drip | Cloud | ✅ Live |
 | **Environment/weather** | Weather gateway + outdoor station | Local | ✅ Live |
 | **VPD** | Computed from tent temp/humidity with a leaf offset | Derived | ✅ Live |
+
+![The Grow page: soil moisture, tent climate, per-plant stage tracking and a VPD coach](docs/screenshots/grow.jpg)
 
 The soil-moisture probe runs on a **fully local** integration so the dry-out alarm works
 even if the internet is down — the single most safety-critical sensor in the whole house,
@@ -227,7 +248,9 @@ width of a target band.
 | **Adaptive Lighting** | HACS | Local | ✅ Live |
 | **Soil / environment** | HACS, local LAN polling | Local | ✅ Live |
 | **Tent controller** | HACS (vendor API) | Cloud | ✅ Live |
-| **ZHA / Zigbee2MQTT** (shades) | Home Assistant core + USB coordinator | Local (Zigbee) | 🔧 In progress |
+| **ZHA** (Zigbee shades) | Home Assistant core + USB coordinator | Local (Zigbee) | ✅ Coordinator live |
+| **Bluetooth** (BLE shades) | ESPHome Bluetooth Proxy on an ESP32 | Local | ✅ Live |
+| **Tuya BLE** (BLE shade control) | HACS, needs per-device local keys | Local | 🔧 In progress |
 | **Contact sensors** | (radio depends on sensor type) | Bridged today | 🔧 Migrating |
 
 📄 **Full setup steps:** see [INSTALL.md](./INSTALL.md) for how the platform and each
@@ -255,28 +278,50 @@ more than one thing watching it.*
 
 ---
 
-## 🪟 Spotlight: Zigbee Shades
+## 🪟 Spotlight: Yoolax shades — Bluetooth *and* Zigbee
 
-This build standardizes window automation on **Zigbee motorized shades**, integrated
-locally through a Zigbee coordinator — no per-vendor cloud or proprietary bridge required,
-which is exactly the open, local-first approach the whole stack is built around.
+Window automation here runs on **Yoolax motorized shades**, and it ended up spanning two
+radios rather than one. That was not the plan, and the reason is worth writing down.
 
-**Integration work:**
+| | Three already hung | Four to come |
+|---|---|---|
+| **Radio** | Bluetooth LE | Zigbee |
+| **Stack** | Tuya BLE (Yoolax is a Tuya white-label) | Standard Zigbee, joins ZHA directly |
+| **Reaches HA via** | An ESP32 Bluetooth proxy | A USB Zigbee coordinator |
+| **Status** | 🔧 Identified, control in progress | 🔧 Coordinator live, awaiting hardware |
 
-- ✅ Zigbee coordinator on the host (USB, passed through to the container)
-- 🔧 Local pairing (ZHA / Zigbee2MQTT) — no cloud dependency
-- 🔧 Cover entities for position control + scheduling
-- 🔧 Automations: sunrise/sunset scheduling, temperature-based shading, scene integration
-- 🔧 One cover group so every panel moves as a unit, plus a physical button
+**Neither vendor page will tell you which one you are buying.** The three that went up
+first turned out to be BLE, and nothing in the listing said so. What settled it was putting
+an ESP32 Bluetooth proxy in the room and reading what the motors actually advertise:
 
-**Why Zigbee fits this project:** motorized shades that speak **standard Zigbee** drop
-straight into an open smart-home stack and work alongside everything else — no walled
-garden. This page documents the real-world integration as it comes together, with setup
-notes for others building the same thing.
+```
+DC:23:53:9C:FF:BC   name "TY"   service fd50   manufacturer 0x07D0   connectable
+DC:23:53:9D:04:2F                service fd50                        connectable
+DC:23:53:9D:05:14                service fd50                        connectable
+```
 
-**One buying note learned the hard way:** a coordinator advertising both Zigbee and Thread
-does one *or* the other depending on the firmware you flash — not both at once. If you have
-already chosen Zigbee devices, the extra money buys nothing usable today.
+Service UUID `fd50` and company ID `0x07D0` are both **Tuya**, and one of them broadcasts
+the name `TY` outright. Three devices, one vendor prefix, three blinds. Identification
+took ten minutes once there was a Bluetooth radio in the house at all — and there had
+never been one before, which is the real reason this took weeks.
+
+**What each path needs:**
+
+- **Zigbee** — a USB coordinator and ZHA. Devices join directly; no vendor hub, no cloud.
+  The coordinator here came up on `ezsp` firmware and formed a network in one pass.
+- **Tuya BLE** — HA's Bluetooth stack plus a proxy for range, and the **local key** for
+  each device, which only comes from a free Tuya IoT Platform account linked to whichever
+  app the blinds are paired in. Note that the *official* Tuya cloud integration is no help
+  here: a BLE-only motor is not cloud-reachable without a Tuya gateway.
+
+**The buying lesson, stated plainly:** shades that speak **standard Zigbee** drop into an
+open stack and are done. Shades that speak **Tuya BLE** work, but only after a proxy, a
+developer account and a key extraction — for the same money and the same-looking product.
+If you are choosing today, ask the vendor which radio ships in the box and do not accept
+"smart" as an answer.
+
+**One more hardware note, since it cost three days.** A coordinator advertising both Zigbee
+and Thread runs one *or* the other depending on the firmware flashed — not both at once.
 
 ---
 
@@ -292,6 +337,10 @@ already chosen Zigbee devices, the extra money buys nothing usable today.
 - [x] Per-person notification preferences and notification deep links
 - [x] Nightly backups with retention
 - [ ] Door/window contact sensors — finish migration off the paid service
+- [x] Zigbee coordinator live, network formed
+- [x] Bluetooth reaches the house at all — ESP32 proxy, HA's first BLE radio
+- [x] The three hung shades identified as Tuya BLE
+- [ ] Tuya BLE local keys, so those three can be driven
 - [ ] Zigbee shades: pair, group, schedule
 - [ ] Off-device backup copy
 - [ ] Decommission the paid subscription

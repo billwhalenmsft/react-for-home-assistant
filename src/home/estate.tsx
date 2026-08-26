@@ -617,7 +617,7 @@ function Masthead({ hass, narrow }: { hass: Hass; narrow: boolean }) {
           <span style={{ fontSize: 30, fontWeight: 200 }}>{temp != null ? Math.round(temp) : '—'}°</span>
           <div>
             <div style={{ fontSize: 12.5, color: T.text, fontWeight: 500 }}>{titleize(w?.state)}</div>
-            <div style={{ fontSize: 11, color: T.dim }}>Savage, MN</div>
+            <div style={{ fontSize: 11, color: T.dim }}>{HOUSE.locality}</div>
           </div>
         </Glass>
         <Glass style={{ padding: '14px 18px', display: 'flex', gap: 10, alignItems: 'center', borderRadius: 18 }}>
@@ -978,23 +978,11 @@ type Fav = { entity: string; name: string; kind: FavKind };
  * you end up hunting the house for the one tile you want to unpin. One edit
  * button on the panel, one list, add and remove in the same place.
  */
-const FAV_CATALOG: ReadonlyArray<Fav> = [
-  { entity: E.lock, name: 'Front Door', kind: 'lock' },
-  { entity: E.garage1, name: 'Main Bay', kind: 'cover' },
-  { entity: E.garage2, name: 'Single Bay', kind: 'cover' },
-  { entity: 'light.main_floor_all_lights', name: 'Main Floor', kind: 'light' },
-  { entity: 'light.kitchen_all_lights', name: 'Kitchen', kind: 'light' },
-  { entity: 'light.living_room_living_room_main_lights', name: 'Living Room', kind: 'light' },
-  { entity: 'light.dining_room_dining_room_chandelier', name: 'Chandelier', kind: 'light' },
-  { entity: 'light.front_foyer_front_foyer_main_lights', name: 'Front Foyer', kind: 'light' },
-  { entity: 'light.mudroom_mudroom_main_lights', name: 'Mudroom', kind: 'light' },
-  { entity: 'light.kitchen_kitchen_island_pendants', name: 'Island Pendants', kind: 'light' },
-  { entity: 'light.garage_single_light', name: 'Single Bay Light', kind: 'light' },
-  { entity: 'light.garage_main_garage_stall_light', name: 'Main Bay Light', kind: 'light' },
-];
+const FAV_CATALOG: ReadonlyArray<Fav> = HOUSE.favourites.catalog;
+
 
 /** What a brand-new user sees before they have edited anything. */
-const FAV_DEFAULT: ReadonlyArray<string> = [E.lock, E.garage1, E.garage2];
+const FAV_DEFAULT: ReadonlyArray<string> = HOUSE.favourites.defaults;
 
 /**
  * Compact tap-to-act tile for the Favorites row. One tap toggles, and the tile
@@ -1311,7 +1299,7 @@ function SkyBanner({ hass, compact }: { hass: Hass; compact?: boolean }) {
   const sun = e[E.sun];
   return (
     <SunArc
-      lat={(attr(e[E.homeZone], 'latitude') as number | undefined) ?? 44.72}
+      lat={(attr(e[E.homeZone], 'latitude') as number | undefined) ?? HOUSE.coords.lat}
       solarNoonIso={attr(sun, 'next_noon') as string | undefined}
       sunriseIso={attr(sun, 'next_rising') as string | undefined}
       sunsetIso={attr(sun, 'next_setting') as string | undefined}
@@ -1394,7 +1382,7 @@ function WeatherPanel({ hass }: { hass: Hass }) {
 
   return (
     <Glass>
-      <PanelHead label="Savage, Minnesota" />
+      <PanelHead label={HOUSE.locality} />
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
         <span style={{ fontSize: 52, fontWeight: 200, lineHeight: 1 }}>{temp != null ? Math.round(temp) : '—'}°</span>
         <div>
@@ -2090,38 +2078,40 @@ function RoomsPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
           between you and the thing you actually wanted. */}
       <FavoritesPanel hass={hass} span={1} narrow={narrow} />
 
-      {/* The grid below is a set of separate boxes, which is exactly what it
-          cannot show: that the kitchen, great room and dining are one
-          connected space. The panorama says that in a single glance. */}
-      <div
-        style={{
-          position: 'relative', borderRadius: T.radius, overflow: 'hidden',
-          border: `1px solid ${T.line}`, lineHeight: 0,
-        }}
-      >
-        <img
-          src="/local/yard/pano_main_floor.jpg"
-          alt="The main floor, kitchen through great room to dining"
-          loading="lazy"
-          style={{ width: '100%', display: 'block', objectFit: 'cover',
-                   maxHeight: narrow ? 150 : 260 }}
-        />
+      {/* A grid of separate boxes cannot show that the kitchen, great room and
+          dining are one connected space. A photo says it in a glance -- when
+          there is one. Optional: no photo, no empty frame. */}
+      {HOUSE.panorama ? (
         <div
           style={{
-            position: 'absolute', inset: 0, pointerEvents: 'none',
-            background: 'linear-gradient(90deg, rgba(0,0,0,0.55), rgba(0,0,0,0) 32%, rgba(0,0,0,0) 70%, rgba(0,0,0,0.45))',
+            position: 'relative', borderRadius: T.radius, overflow: 'hidden',
+            border: `1px solid ${T.line}`, lineHeight: 0,
           }}
-        />
-        {/* lineHeight is reset here on purpose: the wrapper zeroes it to kill
-            the inline gap under the <img>, and that inherits into this caption
-            and collapses both lines onto the same baseline. */}
-        <div style={{ position: 'absolute', left: 18, bottom: 14, pointerEvents: 'none', lineHeight: 1.35 }}>
-          <div style={{ ...LABEL, color: 'rgba(255,255,255,0.72)' }}>The main floor</div>
-          <div style={{ fontSize: 15, fontWeight: 300, color: '#fff', marginTop: 2 }}>
-            Kitchen → Great Room → Dining
+        >
+          <img
+            src={HOUSE.panorama.src}
+            alt={HOUSE.panorama.caption}
+            loading="lazy"
+            style={{ width: '100%', display: 'block', objectFit: 'cover',
+                     maxHeight: narrow ? 150 : 260 }}
+          />
+          <div
+            style={{
+              position: 'absolute', inset: 0, pointerEvents: 'none',
+              background: 'linear-gradient(90deg, rgba(0,0,0,0.55), rgba(0,0,0,0) 32%, rgba(0,0,0,0) 70%, rgba(0,0,0,0.45))',
+            }}
+          />
+          {/* lineHeight is reset here on purpose: the wrapper zeroes it to kill
+              the inline gap under the <img>, and that inherits into this caption
+              and collapses both lines onto the same baseline. */}
+          <div style={{ position: 'absolute', left: 18, bottom: 14, pointerEvents: 'none', lineHeight: 1.35 }}>
+            <div style={{ ...LABEL, color: 'rgba(255,255,255,0.72)' }}>{HOUSE.panorama.label}</div>
+            <div style={{ fontSize: 15, fontWeight: 300, color: '#fff', marginTop: 2 }}>
+              {HOUSE.panorama.caption}
+            </div>
           </div>
         </div>
-      </div>
+      ) : null}
 
       <RoomsGrid hass={hass} narrow={narrow} />
 
@@ -2776,8 +2766,8 @@ function TravelSky({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const away = e[E.phone]?.state !== 'home';
   if (!away || typeof lat !== 'number' || typeof lon !== 'number') return null;
 
-  const homeLat = (attr(e[E.homeZone], 'latitude') as number | undefined) ?? 44.72;
-  const homeLon = (attr(e[E.homeZone], 'longitude') as number | undefined) ?? -93.38;
+  const homeLat = (attr(e[E.homeZone], 'latitude') as number | undefined) ?? HOUSE.coords.lat;
+  const homeLon = (attr(e[E.homeZone], 'longitude') as number | undefined) ?? HOUSE.coords.lon;
   const miles = distanceMiles(homeLat, homeLon, lat, lon);
   // Under ~25 miles the sky is identical to the one at home; showing a second
   // near-identical set of times would be noise, not information.
@@ -2906,8 +2896,8 @@ function SkyPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
       }
     : null;
 
-  const homeLat = (attr(e[E.homeZone], 'latitude') as number | undefined) ?? 44.72;
-  const homeLon = (attr(e[E.homeZone], 'longitude') as number | undefined) ?? -93.38;
+  const homeLat = (attr(e[E.homeZone], 'latitude') as number | undefined) ?? HOUSE.coords.lat;
+  const homeLon = (attr(e[E.homeZone], 'longitude') as number | undefined) ?? HOUSE.coords.lon;
 
   const apod = e[E.apod];
   const apodUrl = attr(apod, 'url') as string | undefined;

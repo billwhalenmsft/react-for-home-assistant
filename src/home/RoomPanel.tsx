@@ -2,6 +2,7 @@ import { useMemo, useState, type CSSProperties } from 'react';
 import { useEntities } from '../ha/useEntities';
 import type { Hass, HassEntity } from '../ha/types';
 import { ROOM_DEVICES } from './rooms';
+import { HOUSE } from '../house';
 import { GarageControl } from './GarageControl';
 import { ArcDial } from './ArcDial';
 
@@ -43,24 +44,7 @@ const serviceOf = (id: string): Service | null => {
 const ORDER: Service[] = ['Lighting', 'Climate', 'Media', 'Access'];
 
 /** Bays get a door control instead of tabs. */
-const GARAGE: Record<string, {
-  cover: string; light?: string; lock?: string; obstruction?: string; openings?: string;
-}> = {
-  'Single Bay': {
-    cover: 'cover.garage_single_door',
-    light: 'light.garage_single_light',
-    lock: 'lock.garage_single_remotes',
-    obstruction: 'binary_sensor.garage_single_obstruction',
-    openings: 'sensor.garage_single_openings',
-  },
-  'Double Bay': {
-    cover: 'cover.garage_main_garage_stall_door',
-    light: 'light.garage_main_garage_stall_light',
-    lock: 'lock.garage_main_garage_stall_lock_remotes',
-    obstruction: 'binary_sensor.garage_main_garage_stall_obstruction',
-    openings: 'sensor.garage_main_garage_stall_openings',
-  },
-};
+const GARAGE = HOUSE.garageBays;
 
 export function RoomPanel({
   hass, floor, room, onClose, variant = 'overlay',

@@ -78,10 +78,36 @@ Some devices aren't Wi-Fi and need their own radio dongle plugged into the host:
 - **Z-Wave** (deadbolts, some sensors) → Z-Wave USB coordinator + Z-Wave JS
 
 On a NAS/Docker host these require **USB passthrough** into the container, and the host
-must be physically near the devices (or use a network-attached radio). If you plan to lean
-heavily on Zigbee/Z-Wave, factor this in when choosing where HA runs.
+must be physically near the devices (or use a network-attached radio).
 
-**Three things that bite people here:**
+**And a container's `/dev` is a snapshot taken when it started.** Plug a radio in, or load
+its driver, while the container is running and the device node appears on the *host* and
+not inside the container. Restarting Home Assistant does nothing for this — it restarts a
+process, not the namespace. **Restart the container.**
+
+If you plan to lean heavily on Zigbee, Z-Wave or Bluetooth, factor all of this in when
+choosing where Home Assistant runs.
+
+**Four things that bite people here:**
+
+- **Your host may not have the driver.** This is the one that cost days. A dongle can
+  enumerate perfectly — the kernel sees the vendor and product — and still produce no
+  `/dev/ttyUSB*`, because the USB-to-serial bridge inside it needs a driver the host
+  hasn't loaded. Silicon Labs CP2102 bridges (`10c4:ea60`, which is most SONOFF sticks)
+  need `cp210x`. Sticks that enumerate as **CDC-ACM** need nothing at all, which is why one
+  radio can work while another sits dead in the next port. Diagnose it like this:
+
+  ```sh
+  ls -l /dev/serial/by-id/ /dev/ttyUSB* /dev/ttyACM*   # is there a port at all?
+  ls /sys/bus/usb-serial/drivers/                       # which drivers exist?
+  find /lib/modules -name 'cp210x*'                     # is the module on disk?
+  sudo insmod /lib/modules/$(uname -r)/cp210x.ko        # load it (path varies!)
+  ```
+
+  On a NAS the module often ships but is never auto-loaded, and `modprobe` needs root.
+  Make it permanent afterwards — QNAP does this via `/etc/config/autorun.sh` plus Control
+  Panel → Hardware → "Run user defined processes during startup" — or your Zigbee network
+  vanishes at the next reboot.
 
 - **Range beats power.** A coordinator on the back of a NAS in a utility room, behind
   ductwork, will show a lock at the far end of the house sitting near the noise floor —
@@ -254,6 +280,34 @@ thermostat are the authority, and the consent screen is the last step, not the f
 5. Pair devices one at a time, next to the coordinator where the manufacturer allows it,
    then move them into place.
 
+### Bluetooth, if you have none
+
+A NAS usually has no Bluetooth radio at all, which means Home Assistant has no `bluetooth`
+integration and nothing BLE works — including devices you already own and assumed were
+supported. The cheapest fix is an **ESP32 running the ESPHome Bluetooth Proxy**:
+
+1. Plug an ESP32 dev board into your PC over USB, in Chrome or Edge, with a **data** cable.
+2. Flash it from the ESPHome Bluetooth Proxy web installer — click-to-flash, no build
+   environment. Pick the plain **ESP32** target for an ESP-WROOM-32.
+3. Give it **2.4 GHz** Wi-Fi in the same flow; ESP32s have no 5 GHz radio.
+4. Power it wherever you need coverage. Home Assistant discovers it through the ESPHome
+   integration and creates the `bluetooth` entry on first connect.
+
+That board becomes the house's BLE radio, so place it for the devices you care about
+rather than next to the server. Signal in the −80s dBm works but is not comfortable; a
+second board is cheaper than debugging flaky range.
+
+Once it is up, this is how you find out what an unlabelled device actually is — the
+advertisement tells you the vendor even when the product page won't:
+
+```js
+// Developer Tools → Template won't do this; use the websocket API.
+{ "type": "bluetooth/subscribe_advertisements" }
+```
+
+Look at `service_uuids` and the manufacturer id. `fd50` / `0x07D0` is Tuya. `fe50` is a
+Blind Engine AM43. Names are often absent, so the UUIDs do the identifying.
+
 **A note on backups before you go further:** Settings → System → Backups, set an automatic
 schedule with retention. Then arrange a copy *off* the machine — a backup living on the
 box it protects is not a backup.
@@ -399,7 +453,9 @@ in-container terminal:
 | Config resets after an update | The `/config` bind mount isn't pointing at a real persistent NAS path. Re-check the path from File Station → Properties. |
 | Integration can't reach a local gateway | Gateway and NAS on different subnets/VLANs that don't route. Confirm connectivity. |
 | A `wget`/installer command "not found" | Try the `curl` equivalent, or confirm you're inside the container shell (`/config#` prompt), not the NAS host shell. |
-| Zigbee/Z-Wave dongle not seen | USB passthrough not configured, or the device path changed. Use `/dev/serial/by-id/...`, never `/dev/ttyUSB0`. |
+| Zigbee/Z-Wave dongle not seen | Work down: does the host see the USB device, is a serial driver bound to it, does a `/dev/tty*` node exist, and does the *container* see that node. Those are four different failures with four different fixes. |
+| Dongle enumerates but there is no `/dev/ttyUSB*` | Missing `cp210x` (or equivalent) driver on the host. See the radio notes above. |
+| Port exists on the host, not in the container | The container's `/dev` was snapshotted at start. Restart the container, not Home Assistant. |
 | Radio works for simple commands, fails for complex ones | Weak signal, not a broken device. Short frames survive a bad link; long encrypted writes don't. Move the antenna. |
 | Panel change doesn't appear after deploy | `/local/` cache. Bump the `?v=` and hard-reload, then verify the served bytes with `curl`. |
 | Panel is blank but the DOM is full | If the browser window isn't focused, CSS animations never get a start time and an entrance animation can hold `opacity: 0`. Check `document.visibilityState` before hunting a render bug. |

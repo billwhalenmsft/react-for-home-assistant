@@ -36,45 +36,17 @@ const rgb = (c: [number, number, number] | undefined, fallback: string) =>
   c ? `rgb(${c[0]},${c[1]},${c[2]})` : fallback;
 
 /** The one entity whose state colours each room. Fuller device lists live in rooms.ts. */
-const ROOM_ENTITY: Record<string, Record<string, string>> = {
-  fp_main: {
-    'Great Room': 'light.living_room_living_room_main_lights',
-    Kitchen: 'light.kitchen_all_lights',
-    Dining: 'light.dining_room_dining_room_chandelier',
-    Entry: 'light.front_foyer_front_foyer_main_lights',
-    Mud: 'light.mudroom_mudroom_main_lights',
-    'Single Bay': 'cover.garage_single_door',
-    'Double Bay': 'cover.garage_main_garage_stall_door',
-  },
-  fp_upper: {
-    Laundry: 'sensor.laundry_room_washer_machine_state',
-    'Master Bedroom': 'media_player.bedroom_bedroom',
-  },
-  fp_lower: {
-    'Family Room': 'media_player.family_room_family_room',
-  },
-};
+const ROOM_ENTITY = HOUSE.plan.roomEntity;
 
 /**
  * Overhead doors on the front facade. Drawn as a bar across the bottom edge of
  * their bay: solid when shut, broken open with light spilling out when not —
  * so an open door is obvious from across the room, not just a colour shift.
  */
-const DOORS: Record<string, Array<{ room: string; entity: string }>> = {
-  fp_main: [
-    { room: 'Single Bay', entity: 'cover.garage_single_door' },
-    { room: 'Double Bay', entity: 'cover.garage_main_garage_stall_door' },
-  ],
-};
+const DOORS = HOUSE.plan.doors;
 
 /** Motion beacons, positioned in plan space. */
-const BEACONS: Record<string, Array<{ entity: string; x: number; y: number }>> = {
-  fp_main: [
-    { entity: 'binary_sensor.front_porch_motion', x: 250, y: 1180 },
-    { entity: 'binary_sensor.living_room_motion', x: 300, y: 560 },
-    { entity: 'binary_sensor.kitchen_dining_motion', x: 700, y: 420 },
-  ],
-};
+const BEACONS = HOUSE.plan.beacons;
 
 /** A room counts as lit when its entity is in one of these states. */
 const LIT = new Set(['on', 'open', 'playing', 'run', 'cleaning']);

@@ -10,8 +10,10 @@ dist/
 src/house/local.ts
 # Emitted by the floorplan tooling from a real drawing.
 src/home/plan.generated.ts
-# A dump of one Home Assistant's live states, for the offline harness.
+# A dump of one real Home Assistant's live states. The committed
+# harness-states.sample.js is the invented one.
 harness-states.js
+harness-states.local.js
 # Rendered floorplans of a real building.
 fp_main.png
 local/
