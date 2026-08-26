@@ -8,6 +8,7 @@ import { useUserData } from '../ha/useUserData';
 import type { Hass, HassEntity } from '../ha/types';
 import { Floorplan } from './floorplan';
 import { RoomsGrid } from './RoomsGrid';
+import { useControlStyle } from './Controls';
 import { THEME_CSS } from './theme';
 import { HousePulse, PulseChart, ForecastStrip } from './pulse';
 import { IssMap, type IssState } from './skymap';
@@ -1568,14 +1569,21 @@ function NestFace({
 }
 
 /**
- * The house has two thermostats on two unrelated systems: the Nest (main
- * floor, SDM API) and the alarm.com stat (lower level). Showing one and
- * hiding the other was how they got conflated in the first place, so the
- * panel carries both and makes you pick which one you are touching.
+ * The house has exactly ONE thermostat.
+ *
+ * It used to be listed here as two, "Main Floor / NEST" and "Lower Level /
+ * ALARM.COM" — but those are two integrations reading the same Nest, not two
+ * devices, and they report identical numbers because they are. The tabs
+ * invited you to pick a zone the building does not have.
+ *
+ * The Nest entity is the one kept: supported_features 411 against the
+ * alarm.com proxy's 3, so it alone offers humidity, the eco preset, fan modes
+ * and hvac_action — and it is the one still standing after the subscription is
+ * cancelled. The tab strip renders only when there is genuinely a choice, so
+ * adding a real second zone later brings it back on its own.
  */
 const CLIMATE_ZONES = [
   { label: 'Main Floor', badge: 'NEST', entity: E.climateNest },
-  { label: 'Lower Level', badge: 'ALARM.COM', entity: E.climate },
 ] as const;
 
 function ClimateDial({ hass }: { hass: Hass }) {
@@ -1739,7 +1747,11 @@ function ClimateDial({ hass }: { hass: Hass }) {
     <Glass style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <PanelHead
         label={`Climate — ${zone.label}`}
-        right={<span style={{ display: 'flex', gap: 4 }}>{CLIMATE_ZONES.map((_, i) => zoneTab(i))}</span>}
+        right={
+          CLIMATE_ZONES.length > 1
+            ? <span style={{ display: 'flex', gap: 4 }}>{CLIMATE_ZONES.map((_, i) => zoneTab(i))}</span>
+            : undefined
+        }
       />
 
       <div
@@ -2152,6 +2164,7 @@ function ProfilePage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   );
   const prefs = useEntities(hass, prefIds);
   const hasPrefs = prefIds.some((id) => prefs[id]);
+  const [ctrlStyle, setCtrlStyle] = useControlStyle(hass);
 
   const [zones, setZones] = useState<ZoneRow[] | null>(null);
   const [form, setForm] = useState({ name: '', lat: '', lon: '', radius: '100' });
@@ -2222,6 +2235,39 @@ function ProfilePage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
           These settings follow your Home Assistant account, not this device.
           Someone else signing in here sees their own.
         </p>
+      </Glass>
+
+      <Glass span={cols}>
+        <PanelHead label="Controls" />
+        <p style={{ margin: '0 0 12px', fontSize: 13, color: T.dim, fontWeight: 300 }}>
+          How lights and the thermostat are operated on the Rooms page.
+        </p>
+        <div style={{ display: 'grid', gap: 8, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+          {([
+            { key: 'square', title: 'Square tiles', blurb: 'Press to switch, press and slide up or down to set the level.' },
+            { key: 'bar', title: 'Rows and sliders', blurb: 'A labelled row per device with a full-width slider beneath it.' },
+          ] as const).map((o) => {
+            const on = ctrlStyle === o.key;
+            return (
+              <button
+                key={o.key}
+                type="button"
+                onClick={() => setCtrlStyle(o.key)}
+                aria-pressed={on}
+                style={{
+                  font: 'inherit', textAlign: 'left', cursor: 'pointer',
+                  display: 'grid', gap: 3, padding: '12px 14px', borderRadius: 12,
+                  border: '1px solid ' + (on ? T.gold : T.line),
+                  background: on ? 'rgba(250,187,90,0.10)' : 'rgba(255,255,255,0.03)',
+                  color: T.text,
+                }}
+              >
+                <span style={{ fontSize: 13, fontWeight: 600 }}>{o.title}</span>
+                <span style={{ fontSize: 11.5, color: T.dim, fontWeight: 300, lineHeight: 1.45 }}>{o.blurb}</span>
+              </button>
+            );
+          })}
+        </div>
       </Glass>
 
       <Glass>

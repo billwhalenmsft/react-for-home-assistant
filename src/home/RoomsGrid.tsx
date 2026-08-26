@@ -5,6 +5,7 @@ import type { Hass } from '../ha/types';
 import { HOUSE } from '../house';
 import type { PlanRoom } from '../house';
 import { ROOM_DEVICES } from './rooms';
+import { ACTIONABLE, EntityControl, rendersAsSquare, useControlStyle } from './Controls';
 
 const { floors: FLOORS, materialColors: MATERIAL_COLORS } = HOUSE.plan;
 import { RoomPanel } from './RoomPanel';
@@ -29,16 +30,16 @@ const rgb = (c: [number, number, number] | undefined, fallback: string) =>
 
 const LIT = new Set(['on', 'open', 'playing', 'run', 'cleaning', 'heat', 'cool']);
 
-/** Domains you can actually do something to from a room tile. */
-const ACTIONABLE = new Set([
-  'light', 'switch', 'cover', 'lock', 'media_player', 'climate',
-  'fan', 'humidifier', 'vacuum', 'scene', 'script', 'select', 'button',
-]);
+/** Rooms that don't ask for a slot sort after those that do, in plan order. */
+const DEFAULT_ORDER = 1000;
 
 interface Tile {
   floor: string;
+  order: number;
   room: PlanRoom;
   entities: string[];
+  /** the up-to-three surfaced on the card itself */
+  favorites: string[];
   note?: string;
 }
 
@@ -65,16 +66,28 @@ export function RoomsGrid({ hass, narrow }: { hass: Hass; narrow: boolean }) {
         const spec = ROOM_DEVICES[floor]?.[room.name];
         if (!spec || spec.entities.length === 0) continue;
         if (spec.hideFromRooms) continue;
-        const actionable = spec.entities.some((id) => ACTIONABLE.has(id.split('.')[0]));
-        if (!actionable) continue;
-        out.push({ floor, room, entities: spec.entities, note: spec.note });
+        const usable = spec.entities.filter((id) => ACTIONABLE.has(id.split('.')[0]));
+        if (usable.length === 0) continue;
+        // What you reach for in this room, straight on the card. The house
+        // config gets first say; absent that, the first three things you can
+        // actually operate — which for every room here is the right answer.
+        // Capped at three: a card that lists everything is the old flat list
+        // again, just with a photo behind it.
+        const favorites = (spec.favorites?.filter((id) => usable.includes(id)) ?? usable).slice(0, 3);
+        out.push({
+          floor, room, entities: spec.entities, favorites, note: spec.note,
+          order: spec.order ?? DEFAULT_ORDER,
+        });
       }
     }
-    return out;
+    // Stable sort: only rooms that asked for a slot move. Everything else
+    // keeps the floorplan's own order, behind them.
+    return out.sort((a, b) => a.order - b.order);
   }, []);
 
   const ids = useMemo(() => [...new Set(tiles.flatMap((t) => t.entities))], [tiles]);
   const states = useEntities(hass, ids);
+  const [ctrl] = useControlStyle(hass);
 
   const summarise = (t: Tile) => {
     const parts: string[] = [];
@@ -106,27 +119,71 @@ export function RoomsGrid({ hass, narrow }: { hass: Hass; narrow: boolean }) {
           const lit = isLit(t);
           const photo = `/local/yard/room_${slug(t.room.name)}.jpg`;
           return (
-            <button
+            <div
               key={`${t.floor}:${t.room.name}`}
-              type="button"
-              onClick={() => setOpen({ floor: t.floor, room: t.room.name })}
-              style={{ ...S.tile, borderColor: lit ? 'var(--wt-lineHi)' : 'var(--wt-line)' }}
+              style={{ ...S.card, borderColor: lit ? 'var(--wt-lineHi)' : 'var(--wt-line)' }}
             >
-              {/* room photo if one exists; the geometry portrait shows through if not */}
-              <span
-                style={{
-                  ...S.photo,
-                  backgroundImage: `url("${photo}")`,
-                }}
-              />
-              <RoomPortrait room={t.room} lit={lit} />
-              <span style={S.scrim} />
-              <span style={S.meta}>
-                <span style={S.name}>{t.room.name}</span>
-                <span style={{ ...S.sub, color: lit ? AMBER : 'var(--wt-dim)' }}>{summarise(t)}</span>
-              </span>
-              {lit ? <span style={S.dot} /> : null}
-            </button>
+              {/*
+                The photo is the way into the room; the strip below it is the
+                way to skip going in at all. They have to be separate elements:
+                controls nested inside a <button> is invalid HTML, and every
+                tap on a dimmer would also open the panel behind it.
+              */}
+              <button
+                type="button"
+                onClick={() => setOpen({ floor: t.floor, room: t.room.name })}
+                aria-label={`Open ${t.room.name}`}
+                style={S.tile}
+              >
+                {/* room photo if one exists; the geometry portrait shows through if not */}
+                <span
+                  style={{
+                    ...S.photo,
+                    backgroundImage: `url("${photo}")`,
+                  }}
+                />
+                <RoomPortrait room={t.room} lit={lit} />
+                <span style={S.scrim} />
+                <span style={S.meta}>
+                  <span style={S.name}>{t.room.name}</span>
+                  <span style={{ ...S.sub, color: lit ? AMBER : 'var(--wt-dim)' }}>{summarise(t)}</span>
+                </span>
+                {lit ? <span style={S.dot} /> : null}
+              </button>
+
+              {t.favorites.length ? (
+                <div style={ctrl === 'square' ? { ...S.strip, ...S.stripSquare } : S.strip}>
+                  {t.favorites.map((id) => (
+                    <div
+                      key={id}
+                      // A domain with no square form spans the whole strip
+                      // instead of being squeezed into a 1:1 cell.
+                      style={ctrl === 'square' && !rendersAsSquare(id, states[id])
+                        ? { gridColumn: '1 / -1', alignSelf: 'center' }
+                        : { minWidth: 0 }}
+                    >
+                      <EntityControl hass={hass} id={id} s={states[id]} size="tile" style={ctrl} />
+                    </div>
+                  ))}
+                  {/*
+                    Always rendered, even when nothing is hidden. Two reasons:
+                    it is a real target (it opens the room), and it is the row
+                    that keeps every card in a row the same height — without it
+                    a room with nothing extra sits shorter than its neighbours.
+                  */}
+                  <button
+                    type="button"
+                    className="est-tap"
+                    onClick={() => setOpen({ floor: t.floor, room: t.room.name })}
+                    style={{ ...S.more, gridColumn: '1 / -1' }}
+                  >
+                    {t.entities.length > t.favorites.length
+                      ? `All ${t.entities.length} in ${t.room.name} →`
+                      : `Open ${t.room.name} →`}
+                  </button>
+                </div>
+              ) : null}
+            </div>
           );
         })}
       </div>
@@ -240,6 +297,15 @@ function RoomPortrait({ room, lit }: { room: PlanRoom; lit: boolean }) {
 }
 
 const S: Record<string, CSSProperties> = {
+  card: {
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    borderRadius: 'var(--wt-radius)',
+    border: '1px solid var(--wt-line)',
+    background: 'var(--wt-ground)',
+    transition: 'border-color 200ms ease',
+  },
   tile: {
     position: 'relative',
     display: 'block',
@@ -250,9 +316,37 @@ const S: Record<string, CSSProperties> = {
     cursor: 'pointer',
     font: 'inherit',
     textAlign: 'left',
-    borderRadius: 'var(--wt-radius)',
-    border: '1px solid var(--wt-line)',
-    background: 'var(--wt-ground)',
+    border: 'none',
+    background: 'transparent',
+  },
+  strip: {
+    display: 'grid',
+    gap: 10,
+    padding: '12px 14px 13px',
+    borderTop: '1px solid var(--wt-line)',
+    background: 'var(--wt-glass)',
+    // Cards in a grid row stretch to the tallest of them. Letting the strip
+    // take that slack, rather than the squares, keeps every control the same
+    // size and puts any leftover space quietly at the bottom.
+    flex: 1,
+    alignContent: 'start',
+  },
+  stripSquare: {
+    // Always three columns, never one per favourite. A room with a single
+    // control was getting a square as wide as the whole card, and 1:1 made
+    // it as tall as it was wide — an enormous button for one lamp.
+    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+  },
+  more: {
+    justifySelf: 'start',
+    font: 'inherit',
+    fontSize: 11,
+    letterSpacing: '0.06em',
+    padding: '4px 0',
+    border: 'none',
+    background: 'transparent',
+    color: 'var(--wt-dim)',
+    cursor: 'pointer',
   },
   portrait: { position: 'absolute', inset: 0, width: '100%', height: '100%' },
   photo: {

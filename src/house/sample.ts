@@ -183,12 +183,16 @@ export const SAMPLE_HOUSE: HouseConfig = {
   rooms: {
     fp_main: {
       'Living Room': {
+        // Most-used room, so it leads the Rooms page. Anything without an
+        // `order` follows in floorplan order.
+        order: 0,
         entities: [
           'light.living_room_lights',
           'media_player.living_room_tv',
           'media_player.av_receiver',
           'binary_sensor.living_room_motion',
         ],
+        favorites: ['light.living_room_lights', 'media_player.living_room_tv'],
         note: 'Recessed cans, 5.1 in-ceiling',
       },
       Kitchen: {
@@ -198,6 +202,7 @@ export const SAMPLE_HOUSE: HouseConfig = {
           'light.kitchen_pendants',
           'binary_sensor.kitchen_motion',
         ],
+        favorites: ['light.kitchen_all_lights', 'light.kitchen_island', 'light.kitchen_pendants'],
         note: 'Cabinet strips and island dimmer',
       },
       Dining: {

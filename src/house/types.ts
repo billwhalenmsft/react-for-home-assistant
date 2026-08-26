@@ -42,6 +42,19 @@ export interface RoomDevices {
   /** optional note shown under the room name */
   note?: string;
   /**
+   * Where this room sits on the Rooms page. Lower sorts first; anything
+   * without one keeps its position from the floorplan, after those that do.
+   * For putting the room the household actually uses at the top.
+   */
+  order?: number;
+  /**
+   * Up to three entity ids to surface directly on the room's tile, so the
+   * gesture you make every day costs no taps at all. Anything left out is
+   * still reachable — opening the room shows everything it has. Defaults to
+   * the first three controllable entities when not set.
+   */
+  favorites?: string[];
+  /**
    * Keep this room off the Rooms grid while leaving it on the floorplan.
    *
    * For rooms that are perfectly real and perfectly controllable, but whose

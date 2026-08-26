@@ -1,18 +1,25 @@
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useMemo, type CSSProperties } from 'react';
 import { useEntities } from '../ha/useEntities';
 import type { Hass, HassEntity } from '../ha/types';
 import { ROOM_DEVICES } from './rooms';
 import { HOUSE } from '../house';
 import { GarageControl } from './GarageControl';
-import { ArcDial } from './ArcDial';
+import { ACTIONABLE, EntityControl, isOn, nameOf, rendersAsSquare, useControlStyle } from './Controls';
 
 /**
- * One room's controls, organised by SERVICE rather than as a flat entity list.
+ * One room, everything in it, all at once.
  *
- * Lighting / Climate / Media / Access are the services a system of this shape
- * presents. A room only shows the tabs it actually has, so the Study doesn't
- * grow an empty Climate tab. Garage bays skip tabs entirely and get their
- * purpose-built door control.
+ * This used to file a room's contents under Lighting / Climate / Media /
+ * Access tabs. That looked tidy and cost a tap for every job: turning on a
+ * lamp and pausing music in the same room meant crossing a tab boundary, and
+ * whichever tab you were not on was invisible rather than merely further down.
+ * A room has three to five things in it. There is nothing to paginate.
+ *
+ * So: one minicard per controllable entity, each carrying its own gesture
+ * inline — toggle, slide to dim, open/stop/close, lock, play, set. Read-only
+ * things fall to a quiet strip at the bottom, because a motion sensor is
+ * something you glance at, not something you operate. Garage bays still skip
+ * all of it for their purpose-built door control.
  *
  * State-only, no history queries: the recorder on this install blocks the UI
  * thread hard enough to freeze the renderer, so nothing here asks it anything.
@@ -20,31 +27,16 @@ import { ArcDial } from './ArcDial';
 
 const AMBER = 'rgb(250,187,90)';
 
-const pretty = (id: string) =>
-  (id.split('.')[1] ?? id).replace(/_/g, ' ').replace(/\b(\w)/g, (m) => m.toUpperCase()).trim();
-
-const nameOf = (id: string, s?: HassEntity) => {
-  const n = (s?.attributes as Record<string, unknown> | undefined)?.friendly_name;
-  return typeof n === 'string' ? n : pretty(id);
-};
-
-const ON = new Set(['on', 'open', 'playing', 'run', 'unlocked', 'cleaning', 'home']);
-
-type Service = 'Lighting' | 'Climate' | 'Media' | 'Access';
-
-const serviceOf = (id: string): Service | null => {
-  const [d] = id.split('.');
-  if (d === 'light' || d === 'switch') return 'Lighting';
-  if (d === 'climate') return 'Climate';
-  if (d === 'media_player') return 'Media';
-  if (d === 'lock' || d === 'cover' || d === 'binary_sensor') return 'Access';
-  return null;
-};
-
-const ORDER: Service[] = ['Lighting', 'Climate', 'Media', 'Access'];
-
-/** Bays get a door control instead of tabs. */
+/** Bays get a door control instead of cards. */
 const GARAGE = HOUSE.garageBays;
+
+/** Cards first, in the order the house config lists them; readouts after. */
+const split = (ids: string[]) => {
+  const controls: string[] = [];
+  const readouts: string[] = [];
+  for (const id of ids) (ACTIONABLE.has(id.split('.')[0]) ? controls : readouts).push(id);
+  return { controls, readouts };
+};
 
 export function RoomPanel({
   hass, floor, room, onClose, variant = 'overlay',
@@ -58,20 +50,8 @@ export function RoomPanel({
   const spec = ROOM_DEVICES[floor]?.[room];
   const ids = useMemo(() => spec?.entities ?? [], [spec]);
   const states = useEntities(hass, ids);
-
-  const groups = useMemo(() => {
-    const g = new Map<Service, string[]>();
-    for (const id of ids) {
-      const svc = serviceOf(id);
-      if (!svc) continue;
-      g.set(svc, [...(g.get(svc) ?? []), id]);
-    }
-    return g;
-  }, [ids]);
-
-  const tabs = ORDER.filter((s) => groups.has(s));
-  const [tab, setTab] = useState<Service | null>(null);
-  const active = tab && tabs.includes(tab) ? tab : tabs[0];
+  const { controls, readouts } = useMemo(() => split(ids), [ids]);
+  const [ctrl] = useControlStyle(hass);
   const isGarage = !!GARAGE[room];
 
   return (
@@ -81,7 +61,7 @@ export function RoomPanel({
       aria-label={`${room} controls`}
     >
       <div style={S.head}>
-        <div>
+        <div style={{ minWidth: 0 }}>
           <div style={S.title}>{room}</div>
           {spec?.note ? <div style={S.note}>{spec.note}</div> : null}
         </div>
@@ -90,173 +70,58 @@ export function RoomPanel({
 
       {isGarage ? (
         <GarageControl hass={hass} {...GARAGE[room]} />
-      ) : tabs.length === 0 ? (
+      ) : ids.length === 0 ? (
         <div style={S.empty}>Nothing wired in this room yet.</div>
       ) : (
         <>
-          {tabs.length > 1 && (
-            <div style={S.tabs} role="tablist">
-              {tabs.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  role="tab"
-                  aria-selected={t === active}
-                  onClick={() => setTab(t)}
-                  style={{ ...S.tab, ...(t === active ? S.tabOn : null) }}
-                >
-                  {t}
-                </button>
-              ))}
+          {controls.length ? (
+            <div style={ctrl === 'square' ? S.squares : S.cards}>
+              {controls.map((id) => {
+                const sq = ctrl === 'square' && rendersAsSquare(id, states[id]);
+                return (
+                  <div
+                    key={id}
+                    // Squares tile; anything without a square form takes the
+                    // full width as a bar card rather than being cropped into
+                    // a cell that cannot hold it.
+                    style={sq ? { minWidth: 0 } : { ...S.cell, gridColumn: '1 / -1' }}
+                  >
+                    <EntityControl hass={hass} id={id} s={states[id]} size="card" style={ctrl} />
+                  </div>
+                );
+              })}
             </div>
-          )}
-          {active === 'Lighting' ? (
-            <Lighting hass={hass} ids={groups.get('Lighting') ?? []} states={states} />
-          ) : active === 'Climate' ? (
-            <Climate hass={hass} ids={groups.get('Climate') ?? []} states={states} />
           ) : (
-            <Rows hass={hass} ids={groups.get(active as Service) ?? []} states={states} />
+            <div style={S.empty}>Nothing here to operate — only readings.</div>
           )}
+
+          {readouts.length ? (
+            <div style={S.readouts}>
+              {readouts.map((id) => <Readout key={id} id={id} s={states[id]} />)}
+            </div>
+          ) : null}
         </>
       )}
     </div>
   );
 }
 
-/* ----------------------------------------------------------------- lighting */
-
-function Lighting({ hass, ids, states }: { hass: Hass; ids: string[]; states: Record<string, HassEntity> }) {
-  // the dial drives the first dimmable light; the rest get toggle rows
-  const dimmable =
-    ids.find((id) => {
-      const s = states[id];
-      return (
-        id.startsWith('light.') &&
-        s &&
-        ((s.attributes as Record<string, unknown>)?.brightness !== undefined || s.state === 'on')
-      );
-    }) ?? ids.find((id) => id.startsWith('light.'));
-
-  const s = dimmable ? states[dimmable] : undefined;
-  const bri = (s?.attributes as Record<string, unknown> | undefined)?.brightness;
-  const pct = typeof bri === 'number' ? Math.round(bri / 2.55) : s?.state === 'on' ? 100 : 0;
-  const [local, setLocal] = useState<number | null>(null);
-
-  const commit = (v: number) => {
-    if (!dimmable) return;
-    setLocal(null);
-    if (v <= 0) void hass.callService('light', 'turn_off', {}, { entity_id: dimmable });
-    else void hass.callService('light', 'turn_on', { brightness_pct: v }, { entity_id: dimmable });
-  };
-
-  const rest = ids.filter((id) => id !== dimmable);
-
+/** A thing you look at rather than press. Deliberately not a button. */
+function Readout({ id, s }: { id: string; s?: HassEntity }) {
+  const on = isOn(s);
   return (
-    <div style={{ display: 'grid', gap: 12, justifyItems: 'center' }}>
-      {dimmable ? (
-        <>
-          <ArcDial
-            value={local ?? pct}
-            onChange={setLocal}
-            onCommit={commit}
-            unit="%"
-            label={nameOf(dimmable, s)}
-            ariaLabel={`${nameOf(dimmable, s)} brightness`}
-          />
-          <button
-            type="button"
-            onClick={() => void hass.callService('light', 'toggle', {}, { entity_id: dimmable })}
-            style={{ ...S.wide, ...(s?.state === 'on' ? S.wideOn : null) }}
-          >
-            {s?.state === 'on' ? 'Turn off' : 'Turn on'}
-          </button>
-        </>
-      ) : null}
-      {rest.length ? (
-        <div style={{ ...S.list, width: '100%' }}>
-          {rest.map((id) => <Row key={id} hass={hass} id={id} s={states[id]} />)}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ climate */
-
-function Climate({ hass, ids, states }: { hass: Hass; ids: string[]; states: Record<string, HassEntity> }) {
-  const id = ids[0];
-  const s = states[id];
-  const a = (s?.attributes ?? {}) as Record<string, unknown>;
-  const target = typeof a.temperature === 'number' ? a.temperature : 70;
-  const current = typeof a.current_temperature === 'number' ? a.current_temperature : undefined;
-  const [local, setLocal] = useState<number | null>(null);
-
-  return (
-    <div style={{ display: 'grid', gap: 10, justifyItems: 'center' }}>
-      <ArcDial
-        value={local ?? target}
-        min={55}
-        max={85}
-        unit="°"
-        label={s?.state ? `${s.state}${current !== undefined ? ` · now ${Math.round(current)}°` : ''}` : 'Thermostat'}
-        ariaLabel={`${nameOf(id, s)} target temperature`}
-        onChange={setLocal}
-        onCommit={(v) => {
-          setLocal(null);
-          void hass.callService('climate', 'set_temperature', { temperature: v }, { entity_id: id });
-        }}
-      />
-    </div>
-  );
-}
-
-/* --------------------------------------------------------------------- rows */
-
-function Rows({ hass, ids, states }: { hass: Hass; ids: string[]; states: Record<string, HassEntity> }) {
-  return (
-    <div style={S.list}>
-      {ids.map((id) => <Row key={id} hass={hass} id={id} s={states[id]} />)}
-    </div>
-  );
-}
-
-function Row({ hass, id, s }: { hass: Hass; id: string; s?: HassEntity }) {
-  const [domain] = id.split('.');
-  const on = s ? ON.has(s.state) : false;
-  const can = ['light', 'switch', 'fan', 'cover', 'lock', 'media_player'].includes(domain);
-
-  const act = () => {
-    const st = s?.state;
-    if (domain === 'light' || domain === 'switch' || domain === 'fan') {
-      void hass.callService(domain, 'toggle', {}, { entity_id: id });
-    } else if (domain === 'cover') {
-      void hass.callService('cover', st === 'open' ? 'close_cover' : 'open_cover', {}, { entity_id: id });
-    } else if (domain === 'lock') {
-      void hass.callService('lock', st === 'locked' ? 'unlock' : 'lock', {}, { entity_id: id });
-    } else if (domain === 'media_player') {
-      void hass.callService('media_player', 'media_play_pause', {}, { entity_id: id });
-    }
-  };
-
-  return (
-    <button
-      type="button"
-      disabled={!can}
-      onClick={() => can && act()}
-      style={{ ...S.row, ...(on ? S.rowOn : null), cursor: can ? 'pointer' : 'default' }}
-    >
+    <div style={S.readout}>
       <span
+        aria-hidden="true"
         style={{
-          width: 8,
-          height: 8,
-          borderRadius: '50%',
+          width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
           background: on ? AMBER : 'var(--wt-line)',
-          boxShadow: on ? `0 0 10px ${AMBER}` : 'none',
+          boxShadow: on ? `0 0 9px ${AMBER}` : 'none',
         }}
       />
-      <span style={S.label}>{nameOf(id, s)}</span>
-      <span style={S.state}>{s ? s.state.replace(/_/g, ' ') : '—'}</span>
-    </button>
+      <span style={S.readoutName}>{nameOf(id, s)}</span>
+      <span style={S.readoutState}>{s ? s.state.replace(/_/g, ' ') : '—'}</span>
+    </div>
   );
 }
 
@@ -269,35 +134,25 @@ const S: Record<string, CSSProperties> = {
     border: '1px solid var(--wt-line)', boxShadow: '0 18px 50px rgba(0,0,0,0.55)', zIndex: 5,
   },
   inline: { position: 'static', width: '100%', maxHeight: '80vh' },
-  head: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 12 },
+  head: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 14 },
   title: { fontSize: 17, fontWeight: 700, letterSpacing: '0.02em', color: 'var(--wt-text)' },
   note: { fontSize: 11, color: 'var(--wt-dim)', marginTop: 3, lineHeight: 1.4 },
   close: {
     border: '1px solid var(--wt-line)', background: 'transparent', color: 'var(--wt-dim)',
-    borderRadius: 10, width: 28, height: 28, cursor: 'pointer', fontSize: 13, lineHeight: 1,
+    borderRadius: 10, width: 28, height: 28, cursor: 'pointer', fontSize: 13, lineHeight: 1, flexShrink: 0,
   },
-  tabs: { display: 'flex', gap: 4, marginBottom: 14, padding: 3, borderRadius: 999, background: 'var(--wt-glass)' },
-  tab: {
-    flex: 1, padding: '7px 6px', borderRadius: 999, cursor: 'pointer', font: 'inherit',
-    fontSize: 10.5, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
-    color: 'var(--wt-dim)', background: 'transparent', border: 'none',
+  cards: { display: 'grid', gap: 9 },
+  squares: { display: 'grid', gap: 9, gridTemplateColumns: 'repeat(auto-fill, minmax(104px, 1fr))' },
+  cell: {
+    padding: '11px 12px', borderRadius: 14, minWidth: 0,
+    background: 'var(--wt-glass)', border: '1px solid var(--wt-line)',
   },
-  tabOn: { color: 'var(--wt-onAccent)', background: 'var(--wt-gold)' },
-  wide: {
-    width: '100%', padding: '11px 12px', borderRadius: 'calc(var(--wt-radius) / 1.8)', cursor: 'pointer',
-    font: 'inherit', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
-    color: 'var(--wt-text)', background: 'var(--wt-glass)', border: '1px solid var(--wt-line)',
+  readouts: { display: 'grid', gap: 6, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--wt-line)' },
+  readout: { display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 9, minWidth: 0 },
+  readoutName: {
+    fontSize: 12, color: 'var(--wt-text)', overflow: 'hidden',
+    textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
   },
-  wideOn: { color: 'var(--wt-onAccent)', background: 'var(--wt-gold)', borderColor: 'var(--wt-gold)' },
-  list: { display: 'grid', gap: 7 },
-  row: {
-    display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 10,
-    padding: '9px 11px', borderRadius: 12, textAlign: 'left', font: 'inherit',
-    background: 'var(--wt-glass)', border: '1px solid var(--wt-line)', color: 'var(--wt-text)',
-    transition: 'background 160ms ease, border-color 160ms ease',
-  },
-  rowOn: { background: 'var(--wt-glassHi)', borderColor: 'var(--wt-lineHi)' },
-  label: { fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  state: { fontSize: 11, color: 'var(--wt-dim)', textTransform: 'capitalize' },
+  readoutState: { fontSize: 11, color: 'var(--wt-dim)', textTransform: 'capitalize', flexShrink: 0 },
   empty: { fontSize: 12.5, color: 'var(--wt-dim)', padding: '10px 4px', lineHeight: 1.5 },
 };
