@@ -301,23 +301,25 @@ type Page = 'home' | 'rooms' | 'people' | 'profile' | 'cinema' | 'security' | 'g
  * rest of the house. Different from `adminOnly`, which is a role check the
  * user cannot alter.
  */
-type NavItem = { id: Page; label: string; icon: string; primary?: boolean; adminOnly?: boolean; optional?: boolean };
+type NavItem = { id: Page; label: string; icon: string; adminOnly?: boolean; optional?: boolean };
 
 /**
- * `primary` marks the four destinations the phone bar shows directly. Nine
- * tabs across a 390px screen gave every one of them ~43px, which crushed the
- * labels and pushed Profile and Setup into the corner where they could not be
- * read or reliably tapped. Everything without the flag lives one tap deeper in
- * the More sheet; the wide rail still shows all of them at once.
- *
  * `adminOnly` keeps house-wide dials off non-admin phones entirely, rather
  * than showing a tab that leads to a page explaining they cannot use it.
+ *
+ * `optional` pages start hidden for everybody and appear only once their
+ * owner switches them on in Profile -> Your pages.
+ *
+ * There is no `primary` flag any more. The phone bar used to show four
+ * hard-coded destinations; it now shows the first four of YOUR order, so
+ * moving a page to the top is what puts it on the bar. Nine tabs across a
+ * 390px screen gave each ~43px and crushed the labels, hence still four.
  */
 const NAV: ReadonlyArray<NavItem> = [
-  { id: 'home', label: 'Home', icon: P.home, primary: true },
-  { id: 'rooms', label: 'Rooms', icon: P.rooms, primary: true },
-  { id: 'security', label: 'Security', icon: P.shield, primary: true },
-  { id: 'grow', label: 'Grow', icon: P.leaf, primary: true },
+  { id: 'home', label: 'Home', icon: P.home },
+  { id: 'rooms', label: 'Rooms', icon: P.rooms },
+  { id: 'security', label: 'Security', icon: P.shield },
+  { id: 'grow', label: 'Grow', icon: P.leaf },
   { id: 'people', label: 'People', icon: P.people },
   { id: 'cinema', label: 'Cinema', icon: P.cinema },
   { id: 'sky', label: 'Sky', icon: P.sky },
@@ -334,16 +336,45 @@ const NAV: ReadonlyArray<NavItem> = [
  */
 const PAGE_IDS = new Set<string>(NAV.map((n) => n.id));
 
-/** The pages a given user may see: role check, then their own opt-ins. */
-function visibleNav(admin: boolean, enabled: ReadonlySet<string>) {
-  return NAV.filter((n) => (admin || !n.adminOnly) && (!n.optional || enabled.has(n.id)));
+/**
+ * Which pages a person sees, and in what order. Stored per-user server-side
+ * (see useUserData), so it follows them to any device they sign in on and
+ * leaves everyone else's nav alone.
+ */
+type NavPrefs = { order: string[]; hidden: string[] };
+
+/**
+ * Home is where a stale or hidden link lands, and Profile is where these very
+ * switches live -- hiding either would strand someone with no way back, so
+ * neither can be switched off. Both can still be reordered.
+ */
+const LOCKED_VISIBLE = new Set<string>(['home', 'profile']);
+
+const PAGE_HINT: Record<string, string> = {
+  printers: 'Bambu H2D and X1C -- chamber cameras and job status.',
+};
+
+/** Default: everything on except the optional pages, in the order NAV declares. */
+function defaultPrefs(): NavPrefs {
+  return { order: NAV.map((n) => n.id), hidden: NAV.filter((n) => n.optional).map((n) => n.id) };
 }
 
-const OPTIONAL_NAV = NAV.filter((n) => n.optional);
+/** Role check, then the user's own hidden list, then their own order. */
+function visibleNav(admin: boolean, prefs: NavPrefs) {
+  const rank = new Map(prefs.order.map((id, i) => [id, i]));
+  return NAV
+    .filter((n) => admin || !n.adminOnly)
+    .filter((n) => LOCKED_VISIBLE.has(n.id) || !prefs.hidden.includes(n.id))
+    .sort((a, b) => (rank.get(a.id) ?? 99) - (rank.get(b.id) ?? 99));
+}
 
-const OPTIONAL_HINT: Record<string, string> = {
-  printers: 'Bambu H2D and X1C — live chamber cameras and job status.',
-};
+/** Role check and order, but ignoring hidden -- this is what Profile lists. */
+function orderedNav(admin: boolean, prefs: NavPrefs) {
+  const rank = new Map(prefs.order.map((id, i) => [id, i]));
+  return NAV
+    .filter((n) => admin || !n.adminOnly)
+    .sort((a, b) => (rank.get(a.id) ?? 99) - (rank.get(b.id) ?? 99));
+}
 
 function pageFromHash(): Page {
   const h = (window.location.hash || '').replace(/^#\/?/, '').split('?')[0];
@@ -355,10 +386,18 @@ export function EstateApp({ hass }: { hass: Hass }) {
   const [page, setPageState] = useState<Page>(pageFromHash);
   const narrow = useNarrow();
 
-  // Per-user opt-ins for `optional` nav entries. Defaults to [] — every
-  // optional page is hidden until its owner asks for it.
-  const [optionalPages, setOptionalPages] = useUserData<string[]>(hass, 'estate.optionalPages', []);
-  const enabled = useMemo(() => new Set(optionalPages), [optionalPages]);
+  // Per-user nav preferences: which pages are hidden, and what order they sit
+  // in. `estate.optionalPages` was the previous shape (just a list of enabled
+  // optional pages); it is still read so anyone who had already switched
+  // Printers on keeps it, and the first save here writes the new shape.
+  const [savedNav, saveNav] = useUserData<NavPrefs | null>(hass, 'estate.nav', null);
+  const [legacyOptional] = useUserData<string[]>(hass, 'estate.optionalPages', []);
+
+  const navPrefs = useMemo<NavPrefs>(() => {
+    if (savedNav && Array.isArray(savedNav.order)) return savedNav;
+    const d = defaultPrefs();
+    return { ...d, hidden: d.hidden.filter((id) => !legacyOptional.includes(id)) };
+  }, [savedNav, legacyOptional]);
 
   // Writing the hash keeps the URL shareable and gives the back button
   // something sensible to do; replaceState avoids stacking one history entry
@@ -402,7 +441,7 @@ export function EstateApp({ hass }: { hass: Hass }) {
 
       <AmbientLayer hass={hass} />
 
-      {!narrow && <Rail page={page} setPage={setPage} admin={admin} enabled={enabled} />}
+      {!narrow && <Rail page={page} setPage={setPage} admin={admin} prefs={navPrefs} />}
 
       <main style={{
         flex: 1, minWidth: 0, padding: narrow ? '20px 16px 96px' : '30px 38px 48px',
@@ -414,28 +453,29 @@ export function EstateApp({ hass }: { hass: Hass }) {
           {page === 'home' && <HomePage hass={hass} narrow={narrow} go={setPage} />}
           {page === 'rooms' && <RoomsPage hass={hass} narrow={narrow} />}
           {page === 'people' && <PeoplePage hass={hass} narrow={narrow} />}
-          {page === 'profile' && <ProfilePage hass={hass} narrow={narrow} />}
+          {page === 'profile' && <ProfilePage hass={hass} narrow={narrow}
+            admin={admin} navPrefs={navPrefs} savePrefs={saveNav} />}
           {page === 'cinema' && <CinemaPage hass={hass} narrow={narrow} />}
           {page === 'security' && <SecurityPage hass={hass} narrow={narrow} />}
           {page === 'grow' && <GrowPage hass={hass} narrow={narrow} />}
           {page === 'sky' && <SkyPage hass={hass} narrow={narrow} />}
-          {page === 'printers' && (enabled.has('printers')
+          {page === 'printers' && (!navPrefs.hidden.includes('printers')
             ? <PrintersPage hass={hass} narrow={narrow} />
             : <HomePage hass={hass} narrow={narrow} go={setPage} />)}
           {page === 'settings' && <SettingsPage hass={hass} narrow={narrow}
-            optionalPages={optionalPages} setOptionalPages={setOptionalPages} />}
+            prefs={navPrefs} savePrefs={saveNav} />}
         </div>
       </main>
 
-      {narrow && <BottomBar page={page} setPage={setPage} admin={admin} enabled={enabled} />}
+      {narrow && <BottomBar page={page} setPage={setPage} admin={admin} prefs={navPrefs} />}
     </div>
   );
 }
 
-function Rail({ page, setPage, admin, enabled }: {
-  page: Page; setPage: (p: Page) => void; admin: boolean; enabled: ReadonlySet<string>;
+function Rail({ page, setPage, admin, prefs }: {
+  page: Page; setPage: (p: Page) => void; admin: boolean; prefs: NavPrefs;
 }) {
-  const items = visibleNav(admin, enabled);
+  const items = visibleNav(admin, prefs);
   return (
     <nav aria-label="Sections" style={{
       width: 86, flex: 'none', borderRight: `1px solid ${T.line}`,
@@ -474,13 +514,14 @@ function Rail({ page, setPage, admin, enabled }: {
   );
 }
 
-function BottomBar({ page, setPage, admin, enabled }: {
-  page: Page; setPage: (p: Page) => void; admin: boolean; enabled: ReadonlySet<string>;
+function BottomBar({ page, setPage, admin, prefs }: {
+  page: Page; setPage: (p: Page) => void; admin: boolean; prefs: NavPrefs;
 }) {
   const [more, setMore] = useState(false);
-  const items = visibleNav(admin, enabled);
-  const primary = items.filter((n) => n.primary);
-  const rest = items.filter((n) => !n.primary);
+  const items = visibleNav(admin, prefs);
+  // The bar is the top four of the user's own order; the rest go in More.
+  const primary = items.slice(0, 4);
+  const rest = items.slice(4);
   const restActive = rest.some((n) => n.id === page);
 
   // Escape closes the sheet, and so does landing on a page: tapping a
@@ -2101,7 +2142,25 @@ const NOTIF_CATEGORIES: ReadonlyArray<{ key: string; label: string; blurb: strin
 
 type ZoneRow = { id: string; name: string; latitude: number; longitude: number; radius: number };
 
-function ProfilePage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
+function ReorderButton({ children, label, disabled, onClick }: {
+  children: ReactNode; label: string; disabled: boolean; onClick: () => void;
+}) {
+  return (
+    <button type="button" aria-label={label} disabled={disabled} onClick={onClick}
+      style={{
+        width: 24, height: 16, lineHeight: '14px', fontSize: 8, padding: 0, borderRadius: 4,
+        cursor: disabled ? 'default' : 'pointer',
+        background: disabled ? 'transparent' : 'rgba(255,255,255,0.05)',
+        border: '1px solid ' + (disabled ? 'transparent' : T.line),
+        color: disabled ? T.faint : T.dim,
+      }}>{children}</button>
+  );
+}
+
+function ProfilePage({ hass, narrow, admin, navPrefs, savePrefs }: {
+  hass: Hass; narrow: boolean; admin: boolean;
+  navPrefs: NavPrefs; savePrefs: (v: NavPrefs) => void;
+}) {
   const who = (hass.user?.name || '').trim().split(/\s+/)[0].toLowerCase();
   const prefIds = useMemo(
     () => NOTIF_CATEGORIES.map((c) => 'input_boolean.notif_' + who + '_' + c.key),
@@ -2171,6 +2230,33 @@ function ProfilePage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
     </label>
   );
 
+  const pageRows = orderedNav(admin, navPrefs);
+
+  /* Swap with the neighbour rather than splice-and-insert: with a short list
+     and two arrow buttons that is exactly what the user is asking for, and it
+     behaves identically on a desktop rail and a phone -- no drag libraries, no
+     touch/pointer-event divergence. Ids this user cannot see (an admin-only
+     page, for a family member) are kept on the end so their position survives
+     somebody else's reordering. */
+  const movePage = (id: string, dir: -1 | 1) => {
+    const ids: string[] = pageRows.map((n) => n.id);
+    const i = ids.indexOf(id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    savePrefs({ ...navPrefs, order: [...ids, ...navPrefs.order.filter((x) => !ids.includes(x))] });
+  };
+
+  const togglePage = (id: string) => {
+    if (LOCKED_VISIBLE.has(id)) return;
+    savePrefs({
+      ...navPrefs,
+      hidden: navPrefs.hidden.includes(id)
+        ? navPrefs.hidden.filter((x) => x !== id)
+        : [...navPrefs.hidden, id],
+    });
+  };
+
   const cols = narrow ? 1 : 2;
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
@@ -2180,6 +2266,50 @@ function ProfilePage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
           These settings follow your Home Assistant account, not this device.
           Someone else signing in here sees their own.
         </p>
+      </Glass>
+
+      <Glass span={cols}>
+        <PanelHead label="Your pages" />
+        <p style={{ margin: '0 0 4px', fontSize: 13, color: T.dim, fontWeight: 300 }}>
+          Which sections you see, and the order they appear in. On a phone the
+          top four are the bar along the bottom and the rest sit under More.
+          Home and Profile cannot be switched off.
+        </p>
+        {pageRows.map((n, i) => {
+          const hidden = navPrefs.hidden.includes(n.id);
+          const locked = LOCKED_VISIBLE.has(n.id);
+          const dim = hidden && !locked;
+          return (
+            <div key={n.id} style={{
+              padding: '11px 0', borderBottom: '1px solid ' + T.line,
+              display: 'flex', alignItems: 'center', gap: 10,
+            }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <ReorderButton label={'Move ' + n.label + ' up'} disabled={i === 0}
+                  onClick={() => movePage(n.id, -1)}>{'\u25B2'}</ReorderButton>
+                <ReorderButton label={'Move ' + n.label + ' down'} disabled={i === pageRows.length - 1}
+                  onClick={() => movePage(n.id, 1)}>{'\u25BC'}</ReorderButton>
+              </div>
+              <Icon d={n.icon} size={17} color={dim ? T.faint : T.gold} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14.5, fontWeight: 500, color: dim ? T.dim : T.text }}>
+                  {n.label}
+                  {!hidden && i < 4 && (
+                    <span style={{ fontSize: 10.5, color: T.faint, marginLeft: 7 }}>phone bar</span>
+                  )}
+                </div>
+                {PAGE_HINT[n.id] && (
+                  <div style={{ fontSize: 11.5, color: T.dim, marginTop: 2 }}>{PAGE_HINT[n.id]}</div>
+                )}
+              </div>
+              {locked
+                ? <span style={{ fontSize: 11.5, color: T.faint }}>Always on</span>
+                : <Pill active={!hidden} onClick={() => togglePage(n.id)}>
+                    {hidden ? 'Hidden' : 'Shown'}
+                  </Pill>}
+            </div>
+          );
+        })}
       </Glass>
 
       <Glass span={cols}>
@@ -3320,10 +3450,9 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function SettingsPage({ hass, narrow, optionalPages, setOptionalPages }: {
+function SettingsPage({ hass, narrow, prefs, savePrefs }: {
   hass: Hass; narrow: boolean;
-  optionalPages: readonly string[];
-  setOptionalPages: (v: string[]) => void;
+  prefs: NavPrefs; savePrefs: (v: NavPrefs) => void;
 }) {
   const cols = narrow ? 1 : 2;
   const admin = hass.user?.is_admin === true;
@@ -3334,7 +3463,8 @@ function SettingsPage({ hass, narrow, optionalPages, setOptionalPages }: {
      is where their own alert switches and locations already live. Setup is
      hidden from their nav entirely; this branch only catches a stale link or a
      notification deep-link to #settings. */
-  if (!admin) return <ProfilePage hass={hass} narrow={narrow} />;
+  if (!admin) return <ProfilePage hass={hass} narrow={narrow}
+    admin={admin} navPrefs={prefs} savePrefs={savePrefs} />;
 
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
@@ -3345,31 +3475,6 @@ function SettingsPage({ hass, narrow, optionalPages, setOptionalPages }: {
           schedules read. Changes apply instantly, survive every UI update, and affect the
           whole household. Family members see a personal profile page here instead.
         </div>
-      </Glass>
-
-      <Glass>
-        <PanelHead label="\u{1F9E9} Optional pages" />
-        <div style={{ fontSize: 12.5, color: T.dim, lineHeight: 1.6, paddingBottom: 2 }}>
-          Hidden from everyone by default. These switches are <b style={{ color: T.text }}>yours
-          alone</b> -- turning one on adds the page to your own nav, on every device you sign in
-          on, and changes nothing for anyone else in the house.
-        </div>
-        {OPTIONAL_NAV.map((n) => {
-          const on = optionalPages.includes(n.id);
-          return (
-            <div key={n.id} style={{ padding: '14px 0', borderBottom: `1px solid ${T.line}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 14.5, fontWeight: 500 }}>{n.label}</div>
-                <div style={{ fontSize: 11.5, color: T.dim, marginTop: 2 }}>{OPTIONAL_HINT[n.id] ?? ''}</div>
-              </div>
-              <Pill active={on} onClick={() => setOptionalPages(
-                on ? optionalPages.filter((x) => x !== n.id) : [...optionalPages, n.id]
-              )}>
-                {on ? 'Shown' : 'Hidden'}
-              </Pill>
-            </div>
-          );
-        })}
       </Glass>
 
       <Glass>
