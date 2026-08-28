@@ -3191,6 +3191,7 @@ const PRINTERS = [
 
 function PrintersPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const now = useNow(10000);
+  const [camFailed, setCamFailed] = useState<Record<string, boolean>>({});
   const ids = useMemo(() => PRINTERS.flatMap((m) => [
     `camera.${m.p}_camera`,
     `binary_sensor.${m.p}_online`,
@@ -3215,7 +3216,11 @@ function PrintersPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const bad = (v?: string) => !v || v === 'unavailable' || v === 'unknown';
   const fmt = (id: string, suffix = '') => {
     const v = st(id);
-    return bad(v) ? '--' : `${v}${suffix}`;
+    if (bad(v)) return '--';
+    // Temps and remaining-minutes both arrive with useless precision --
+    // "0.216666666666667 min" is not a number anyone reads.
+    const n = Number(v);
+    return Number.isFinite(n) ? `${Math.round(n)}${suffix}` : `${v}${suffix}`;
   };
 
   return (
@@ -3227,7 +3232,10 @@ function PrintersPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
         const pct = Math.max(0, Math.min(100, Number(st(`sensor.${m.p}_print_progress`) ?? 0)));
         const pic = attr(e[`camera.${m.p}_camera`], 'entity_picture') as string | undefined;
         // Same cache-buster the security cameras use: a fresh URL every 10 s.
-        const url = online && pic ? `${pic}&est=${Math.floor(now.getTime() / 10000)}` : undefined;
+        const failed = camFailed[m.p] === true;
+        const url = online && pic && !failed
+          ? `${pic}&est=${Math.floor(now.getTime() / 10000)}`
+          : undefined;
         const nozzles: ReadonlyArray<readonly [string, string]> = m.dual
           ? [['Left', `sensor.${m.p}_left_nozzle_temperature`],
              ['Right', `sensor.${m.p}_right_nozzle_temperature`]]
@@ -3247,9 +3255,24 @@ function PrintersPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
             }}>
               {url
                 ? <img src={url} alt={`${m.label} chamber`}
+                    onError={() => setCamFailed((f) => ({ ...f, [m.p]: true }))}
                     style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                : <div style={{ display: 'grid', placeItems: 'center', height: '100%', color: T.faint, fontSize: 12 }}>
-                    {online ? 'No signal' : 'Printer offline'}
+                : <div style={{
+                    display: 'grid', placeItems: 'center', height: '100%', gap: 8,
+                    color: T.faint, fontSize: 12, textAlign: 'center', padding: '0 22px',
+                  }}>
+                    {!online ? <span>Printer offline</span> : failed ? (
+                      <>
+                        <span style={{ color: T.dim }}>Live view is off on the printer</span>
+                        <span style={{ fontSize: 11, lineHeight: 1.5 }}>
+                          The printer reports its stream URL as <b>disable</b>. Turn on
+                          LAN Mode Liveview in its Settings, then reload the Bambu integration.
+                        </span>
+                        <Pill active={false} onClick={() => setCamFailed((f) => ({ ...f, [m.p]: false }))}>
+                          Retry
+                        </Pill>
+                      </>
+                    ) : <span>No signal</span>}
                   </div>}
             </div>
 
