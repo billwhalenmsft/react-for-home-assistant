@@ -3324,6 +3324,7 @@ function PrintersPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const [camFailed, setCamFailed] = useState<Record<string, boolean>>({});
   const ids = useMemo(() => PRINTERS.flatMap((m) => [
     `camera.${m.p}_camera`,
+    `image.${m.p}_cover_image`,
     `binary_sensor.${m.p}_online`,
     `binary_sensor.${m.p}_hms_errors`,
     `sensor.${m.p}_print_status`,
@@ -3366,6 +3367,9 @@ function PrintersPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
         const url = online && pic && !failed
           ? `${pic}&est=${Math.floor(now.getTime() / 10000)}`
           : undefined;
+        // Fallback: the sliced model preview for the running job. Only exists
+        // while something is loaded, so it can legitimately be absent.
+        const cover = attr(e[`image.${m.p}_cover_image`], 'entity_picture') as string | undefined;
         const nozzles: ReadonlyArray<readonly [string, string]> = m.dual
           ? [['Left', `sensor.${m.p}_left_nozzle_temperature`],
              ['Right', `sensor.${m.p}_right_nozzle_temperature`]]
@@ -3383,27 +3387,44 @@ function PrintersPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
               borderRadius: 16, overflow: 'hidden', border: `1px solid ${T.line}`,
               background: 'rgba(0,0,0,0.4)', aspectRatio: '16/9', marginBottom: 14,
             }}>
-              {url
-                ? <img src={url} alt={`${m.label} chamber`}
-                    onError={() => setCamFailed((f) => ({ ...f, [m.p]: true }))}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                : <div style={{
-                    display: 'grid', placeItems: 'center', height: '100%', gap: 8,
-                    color: T.faint, fontSize: 12, textAlign: 'center', padding: '0 22px',
+              {url ? (
+                <img src={url} alt={`${m.label} chamber`}
+                  onError={() => setCamFailed((f) => ({ ...f, [m.p]: true }))}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+              ) : online && cover ? (
+                <div style={{ position: 'relative', height: '100%' }}>
+                  <img src={cover} alt={`${m.label} model preview`}
+                    style={{
+                      width: '100%', height: '100%', objectFit: 'contain', display: 'block',
+                      background: 'rgba(0,0,0,0.35)',
+                    }} />
+                  <div style={{
+                    position: 'absolute', left: 0, right: 0, bottom: 0, padding: '18px 12px 7px',
+                    fontSize: 10.5, color: 'rgba(255,255,255,0.72)', textAlign: 'center',
+                    background: 'linear-gradient(transparent, rgba(0,0,0,0.8))',
                   }}>
-                    {!online ? <span>Printer offline</span> : failed ? (
-                      <>
-                        <span style={{ color: T.dim }}>Live view is off on the printer</span>
-                        <span style={{ fontSize: 11, lineHeight: 1.5 }}>
-                          The printer reports its stream URL as <b>disable</b>. Turn on
-                          LAN Mode Liveview in its Settings, then reload the Bambu integration.
-                        </span>
-                        <Pill active={false} onClick={() => setCamFailed((f) => ({ ...f, [m.p]: false }))}>
-                          Retry
-                        </Pill>
-                      </>
-                    ) : <span>No signal</span>}
-                  </div>}
+                    Model preview. Chamber video needs LAN Only Mode on the printer.
+                  </div>
+                </div>
+              ) : (
+                <div style={{
+                  display: 'grid', placeItems: 'center', height: '100%', gap: 8,
+                  color: T.faint, fontSize: 12, textAlign: 'center', padding: '0 22px',
+                }}>
+                  {!online ? <span>Printer offline</span> : failed ? (
+                    <>
+                      <span style={{ color: T.dim }}>No chamber video</span>
+                      <span style={{ fontSize: 11, lineHeight: 1.5 }}>
+                        The printer reports its stream URL as <b>disable</b>. Bambu only
+                        publishes it in LAN Only Mode, which would cost the cloud features.
+                      </span>
+                      <Pill active={false} onClick={() => setCamFailed((f) => ({ ...f, [m.p]: false }))}>
+                        Retry
+                      </Pill>
+                    </>
+                  ) : <span>No signal</span>}
+                </div>
+              )}
             </div>
 
             {running && (
