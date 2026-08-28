@@ -2,12 +2,14 @@
   "name": "react-for-home-assistant",
   "version": "0.1.0",
   "private": false,
-  "description": "Build Home Assistant dashboards with React — standard HA cards and custom React components side by side.",
+  "description": "Build Home Assistant dashboards with React \u2014 standard HA cards and custom React components side by side.",
   "type": "module",
   "scripts": {
     "dev": "vite build --watch",
     "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "publish": "node tools/publish.mjs",
+    "deploy": "npm run build && node tools/publish.mjs"
   },
   "dependencies": {
     "home-assistant-js-websocket": "^9.4.0",
