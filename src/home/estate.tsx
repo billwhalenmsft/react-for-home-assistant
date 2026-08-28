@@ -2567,7 +2567,6 @@ function CinemaPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
 /* ============================================================== security */
 
 function SecurityPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
-  const now = useNow(10000); // refresh camera stills every 10 s
   const ids = useMemo(() => [
     E.lock, E.garage1, E.garage2, E.blink, E.motion,
     ...E.doors.map(([, id]) => id), ...E.cams.map(([, id]) => id),
@@ -2616,33 +2615,188 @@ function SecurityPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
       </Glass>
 
       <Glass span={cols}>
-        <PanelHead label="Eyes on the estate" right={
+        <PanelHead label="Recent clips" right={
           <Pill tone="ghost" onClick={() => void hass.callService('alarm_control_panel', e[E.blink]?.state === 'disarmed' ? 'alarm_arm_away' : 'alarm_disarm', {}, { entity_id: E.blink })}>
             Blink {e[E.blink]?.state === 'disarmed' ? 'Arm' : 'Disarm'}
           </Pill>
         } />
-        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: `repeat(${narrow ? 1 : 3}, minmax(0,1fr))` }}>
-          {E.cams.map(([name, id]) => {
-            const pic = attr(e[id], 'entity_picture') as string | undefined;
-            const url = pic ? `${pic}&est=${Math.floor(now.getTime() / 10000)}` : undefined;
-            return (
-              <figure key={id} className="est-lift" style={{
-                margin: 0, borderRadius: 16, overflow: 'hidden', border: `1px solid ${T.line}`,
-                background: 'rgba(0,0,0,0.4)', aspectRatio: '16/9', position: 'relative',
-              }}>
-                {url
-                  ? <img src={url} alt={`${name} camera`} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                  : <div style={{ display: 'grid', placeItems: 'center', height: '100%', color: T.faint, fontSize: 12 }}>No signal</div>}
-                <figcaption style={{
-                  position: 'absolute', left: 0, right: 0, bottom: 0, padding: '18px 12px 8px',
-                  fontSize: 12, color: '#fff', background: 'linear-gradient(transparent, rgba(0,0,0,0.75))',
-                }}>{name}</figcaption>
-              </figure>
-            );
-          })}
-        </div>
+        <ClipsBank narrow={narrow} />
       </Glass>
     </div>
+  );
+}
+
+/* ============================================================ blink clips */
+
+/*
+ * A bank of recorded clips, replacing the live Blink tiles.
+ *
+ * Live view was throttled to uselessness and would not play on an iPhone, so
+ * what actually exists is a folder of MP4s on the NAS at
+ * Z:\config\www\blink_clips, served locally at /local/blink_clips. Playback
+ * never touches Blink.
+ *
+ * These are for REVIEW, not reaction: measured on 2026-08-28, a clip lands
+ * between 44 s and 50 minutes after the motion that caused it, because Blink
+ * records to their cloud before anything can download it. Anything that needs
+ * to act fast hangs off binary_sensor.<camera>_motion instead.
+ *
+ * HA serves www/ but will not list a directory, so discovery comes from
+ * index.json, written by shell_command.index_blink_clips and refreshed every
+ * two minutes by automation.blink_refresh_clip_index.
+ */
+
+type ClipRow = { f: string; t: number; b: number };
+type Clip = ClipRow & { cam: string };
+
+const CLIP_DIR = '/local/blink_clips';
+
+const CAM_LABEL: Record<string, string> = {
+  front_door: 'Front Door',
+  front_porch: 'Front Porch',
+  wyoming_ave: 'Wyoming Ave',
+  kitchen_dining: 'Kitchen / Dining',
+  cat_room: 'Cat Room',
+  living_room: 'Living Room',
+};
+
+/*
+ * Two writers, two naming schemes, and they overlap:
+ *   20260828_123454_WyomingAve.mp4   the blink-clips container, local time
+ *   wyoming_ave_20260828T173454.mp4  blink.save_recent_clips, UTC
+ * Both are normalised to a single camera key so the filters do not show the
+ * same camera twice.
+ */
+function parseClip(r: ClipRow): Clip {
+  const a = /^\d{8}_\d{6}_(.+)\.mp4$/.exec(r.f);
+  if (a) return { ...r, cam: a[1].replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase() };
+  const b = /^(.+)_\d{8}T\d{6}\.mp4$/.exec(r.f);
+  return { ...r, cam: b ? b[1].toLowerCase() : 'other' };
+}
+
+/*
+ * The same event is often saved twice, once by each writer, seconds apart and
+ * byte-for-byte identical. Same camera + same size within an hour is treated
+ * as one clip. Deliberately not deduping on size alone: two genuinely
+ * different events days apart could collide.
+ */
+function dedupe(clips: Clip[]): Clip[] {
+  const seen = new Map<string, number>();
+  const out: Clip[] = [];
+  for (const c of clips) {
+    const key = `${c.cam}|${c.b}`;
+    const prev = seen.get(key);
+    if (prev != null && Math.abs(prev - c.t) < 3600) continue;
+    seen.set(key, c.t);
+    out.push(c);
+  }
+  return out;
+}
+
+function ago(t: number, now: number): string {
+  const s = Math.max(0, Math.floor(now / 1000 - t));
+  if (s < 90) return `${s}s ago`;
+  if (s < 5400) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return new Date(t * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+const PAGE_SIZE = 12;
+
+function ClipsBank({ narrow }: { narrow: boolean }) {
+  const [clips, setClips] = useState<Clip[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [cam, setCam] = useState<string>('all');
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  const now = useNow(60000);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fetch(`${CLIP_DIR}/index.json`, { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+        .then((rows: ClipRow[]) => {
+          if (cancelled) return;
+          setClips(dedupe(rows.map(parseClip).sort((x, y) => y.t - x.t)));
+          setFailed(false);
+        })
+        .catch(() => { if (!cancelled) setFailed(true); });
+    };
+    load();
+    const h = window.setInterval(load, 120000);
+    return () => { cancelled = true; window.clearInterval(h); };
+  }, []);
+
+  const cams = useMemo(() => {
+    const c = new Map<string, number>();
+    for (const x of clips ?? []) c.set(x.cam, (c.get(x.cam) ?? 0) + 1);
+    return [...c.entries()].sort((a, b) => b[1] - a[1]);
+  }, [clips]);
+
+  if (failed) {
+    return (
+      <div style={{ fontSize: 12.5, color: T.dim, padding: '10px 0' }}>
+        Could not read the clip index. It is written by
+        {' '}<code>shell_command.index_blink_clips</code>{' '}
+        every two minutes.
+      </div>
+    );
+  }
+  if (!clips) {
+    return <div style={{ fontSize: 12.5, color: T.faint, padding: '10px 0' }}>Loading clips...</div>;
+  }
+  if (!clips.length) {
+    return <div style={{ fontSize: 12.5, color: T.faint, padding: '10px 0' }}>No clips recorded yet.</div>;
+  }
+
+  const shown = (cam === 'all' ? clips : clips.filter((c) => c.cam === cam)).slice(0, limit);
+  const total = cam === 'all' ? clips.length : clips.filter((c) => c.cam === cam).length;
+
+  return (
+    <>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, margin: '2px 0 14px' }}>
+        <Pill active={cam === 'all'} onClick={() => { setCam('all'); setLimit(PAGE_SIZE); }}>
+          All {clips.length}
+        </Pill>
+        {cams.map(([id, n]) => (
+          <Pill key={id} active={cam === id} onClick={() => { setCam(id); setLimit(PAGE_SIZE); }}>
+            {(CAM_LABEL[id] ?? id)} {n}
+          </Pill>
+        ))}
+      </div>
+
+      <div style={{ display: 'grid', gap: 14, gridTemplateColumns: `repeat(${narrow ? 1 : 3}, minmax(0,1fr))` }}>
+        {shown.map((c) => (
+          <figure key={c.f} style={{
+            margin: 0, borderRadius: 16, overflow: 'hidden', border: `1px solid ${T.line}`,
+            background: 'rgba(0,0,0,0.4)',
+          }}>
+            {/* #t=0.5 makes the browser show a frame instead of a black box.
+                playsInline keeps iOS from hijacking into fullscreen. */}
+            <video
+              src={`${CLIP_DIR}/${encodeURIComponent(c.f)}#t=0.5`}
+              controls preload="metadata" playsInline
+              style={{ width: '100%', aspectRatio: '16/9', display: 'block', background: '#000' }}
+            />
+            <figcaption style={{
+              display: 'flex', justifyContent: 'space-between', gap: 8,
+              padding: '8px 11px 9px', fontSize: 12, color: T.dim,
+            }}>
+              <span style={{ color: T.text }}>{CAM_LABEL[c.cam] ?? c.cam}</span>
+              <span>{ago(c.t, now.getTime())}</span>
+            </figcaption>
+          </figure>
+        ))}
+      </div>
+
+      {shown.length < total && (
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
+          <Pill active={false} onClick={() => setLimit((n) => n + PAGE_SIZE)}>
+            Show more ({total - shown.length} left)
+          </Pill>
+        </div>
+      )}
+    </>
   );
 }
 
