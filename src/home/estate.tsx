@@ -89,6 +89,7 @@ const P = {
   person: 'M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v3h16v-3c0-2.76-3.58-5-8-5z',
   more: 'M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
   cog: 'M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z',
+  printer: 'M19 8h-1V3H6v5H5a3 3 0 00-3 3v6h4v4h12v-4h4v-6a3 3 0 00-3-3M8 5h8v3H8V5m8 15H8v-5h8v5m3-7a1 1 0 11-1-1 1 1 0 011 1Z',
 };
 
 function Icon({ d, size = 20, color = 'currentColor' }: { d: string; size?: number; color?: string }) {
@@ -291,9 +292,16 @@ const SCENES: ReadonlyArray<Scene> = HOUSE.scenes;
 
 /* ================================================================ shell */
 
-type Page = 'home' | 'rooms' | 'people' | 'profile' | 'cinema' | 'security' | 'grow' | 'sky' | 'settings';
+type Page = 'home' | 'rooms' | 'people' | 'profile' | 'cinema' | 'security' | 'grow' | 'sky' | 'printers' | 'settings';
 
-type NavItem = { id: Page; label: string; icon: string; primary?: boolean; adminOnly?: boolean };
+/**
+ * `optional` pages are OFF for everybody until a user turns them on in Setup.
+ * The switch is per-user (frontend/set_user_data), so enabling Printers puts
+ * it in your nav on every device you sign in on and changes nothing for the
+ * rest of the house. Different from `adminOnly`, which is a role check the
+ * user cannot alter.
+ */
+type NavItem = { id: Page; label: string; icon: string; primary?: boolean; adminOnly?: boolean; optional?: boolean };
 
 /**
  * `primary` marks the four destinations the phone bar shows directly. Nine
@@ -314,6 +322,7 @@ const NAV: ReadonlyArray<NavItem> = [
   { id: 'cinema', label: 'Cinema', icon: P.cinema },
   { id: 'sky', label: 'Sky', icon: P.sky },
   { id: 'profile', label: 'Profile', icon: P.person },
+  { id: 'printers', label: 'Printers', icon: P.printer, optional: true },
   { id: 'settings', label: 'Setup', icon: P.cog, adminOnly: true },
 ];
 
@@ -325,6 +334,17 @@ const NAV: ReadonlyArray<NavItem> = [
  */
 const PAGE_IDS = new Set<string>(NAV.map((n) => n.id));
 
+/** The pages a given user may see: role check, then their own opt-ins. */
+function visibleNav(admin: boolean, enabled: ReadonlySet<string>) {
+  return NAV.filter((n) => (admin || !n.adminOnly) && (!n.optional || enabled.has(n.id)));
+}
+
+const OPTIONAL_NAV = NAV.filter((n) => n.optional);
+
+const OPTIONAL_HINT: Record<string, string> = {
+  printers: 'Bambu H2D and X1C — live chamber cameras and job status.',
+};
+
 function pageFromHash(): Page {
   const h = (window.location.hash || '').replace(/^#\/?/, '').split('?')[0];
   return PAGE_IDS.has(h) ? (h as Page) : 'home';
@@ -334,6 +354,11 @@ export function EstateApp({ hass }: { hass: Hass }) {
   const admin = hass.user?.is_admin === true;
   const [page, setPageState] = useState<Page>(pageFromHash);
   const narrow = useNarrow();
+
+  // Per-user opt-ins for `optional` nav entries. Defaults to [] — every
+  // optional page is hidden until its owner asks for it.
+  const [optionalPages, setOptionalPages] = useUserData<string[]>(hass, 'estate.optionalPages', []);
+  const enabled = useMemo(() => new Set(optionalPages), [optionalPages]);
 
   // Writing the hash keeps the URL shareable and gives the back button
   // something sensible to do; replaceState avoids stacking one history entry
@@ -377,7 +402,7 @@ export function EstateApp({ hass }: { hass: Hass }) {
 
       <AmbientLayer hass={hass} />
 
-      {!narrow && <Rail page={page} setPage={setPage} admin={admin} />}
+      {!narrow && <Rail page={page} setPage={setPage} admin={admin} enabled={enabled} />}
 
       <main style={{
         flex: 1, minWidth: 0, padding: narrow ? '20px 16px 96px' : '30px 38px 48px',
@@ -394,17 +419,23 @@ export function EstateApp({ hass }: { hass: Hass }) {
           {page === 'security' && <SecurityPage hass={hass} narrow={narrow} />}
           {page === 'grow' && <GrowPage hass={hass} narrow={narrow} />}
           {page === 'sky' && <SkyPage hass={hass} narrow={narrow} />}
-          {page === 'settings' && <SettingsPage hass={hass} narrow={narrow} />}
+          {page === 'printers' && (enabled.has('printers')
+            ? <PrintersPage hass={hass} narrow={narrow} />
+            : <HomePage hass={hass} narrow={narrow} go={setPage} />)}
+          {page === 'settings' && <SettingsPage hass={hass} narrow={narrow}
+            optionalPages={optionalPages} setOptionalPages={setOptionalPages} />}
         </div>
       </main>
 
-      {narrow && <BottomBar page={page} setPage={setPage} admin={admin} />}
+      {narrow && <BottomBar page={page} setPage={setPage} admin={admin} enabled={enabled} />}
     </div>
   );
 }
 
-function Rail({ page, setPage, admin }: { page: Page; setPage: (p: Page) => void; admin: boolean }) {
-  const items = NAV.filter((n) => admin || !n.adminOnly);
+function Rail({ page, setPage, admin, enabled }: {
+  page: Page; setPage: (p: Page) => void; admin: boolean; enabled: ReadonlySet<string>;
+}) {
+  const items = visibleNav(admin, enabled);
   return (
     <nav aria-label="Sections" style={{
       width: 86, flex: 'none', borderRight: `1px solid ${T.line}`,
@@ -443,11 +474,11 @@ function Rail({ page, setPage, admin }: { page: Page; setPage: (p: Page) => void
   );
 }
 
-function BottomBar({ page, setPage, admin }: {
-  page: Page; setPage: (p: Page) => void; admin: boolean;
+function BottomBar({ page, setPage, admin, enabled }: {
+  page: Page; setPage: (p: Page) => void; admin: boolean; enabled: ReadonlySet<string>;
 }) {
   const [more, setMore] = useState(false);
-  const items = NAV.filter((n) => admin || !n.adminOnly);
+  const items = visibleNav(admin, enabled);
   const primary = items.filter((n) => n.primary);
   const rest = items.filter((n) => !n.primary);
   const restActive = rest.some((n) => n.id === page);
@@ -3140,7 +3171,137 @@ function SettingAutomationToggle({ hass, entity, label, hint }: {
   );
 }
 
-function SettingsPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
+/* ============================================================== printers */
+
+/*
+ * Bambu printers. Status and live chamber view only -- no pause/resume/stop.
+ * Those buttons need Developer / LAN Only mode on the printer, which costs
+ * Bambu cloud and the Handy app, and the integration does not even create the
+ * button entities while `mqtt_signature_required` is true. Both machines
+ * report mqtt_encryption on, so there is nothing to wire up here.
+ *
+ * The camera is a still refreshed every 10 s, the same trick the security
+ * cameras use -- a permanently live RTSP stream per printer is a lot of
+ * bandwidth for a tab that mostly answers "is it still going?".
+ */
+const PRINTERS = [
+  { p: 'h2d', label: 'H2D', dual: true },
+  { p: 'study_x1c', label: 'X1C', dual: false },
+] as const;
+
+function PrintersPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
+  const now = useNow(10000);
+  const ids = useMemo(() => PRINTERS.flatMap((m) => [
+    `camera.${m.p}_camera`,
+    `binary_sensor.${m.p}_online`,
+    `binary_sensor.${m.p}_hms_errors`,
+    `sensor.${m.p}_print_status`,
+    `sensor.${m.p}_current_stage`,
+    `sensor.${m.p}_task_name`,
+    `sensor.${m.p}_print_progress`,
+    `sensor.${m.p}_current_layer`,
+    `sensor.${m.p}_total_layer_count`,
+    `sensor.${m.p}_remaining_time`,
+    `sensor.${m.p}_bed_temperature`,
+    `sensor.${m.p}_chamber_temperature`,
+    ...(m.dual
+      ? [`sensor.${m.p}_left_nozzle_temperature`, `sensor.${m.p}_right_nozzle_temperature`]
+      : [`sensor.${m.p}_nozzle_temperature`]),
+  ]), []);
+  const e = useEntities(hass, ids);
+  const cols = narrow ? 1 : 2;
+
+  const st = (id: string) => e[id]?.state;
+  const bad = (v?: string) => !v || v === 'unavailable' || v === 'unknown';
+  const fmt = (id: string, suffix = '') => {
+    const v = st(id);
+    return bad(v) ? '--' : `${v}${suffix}`;
+  };
+
+  return (
+    <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+      {PRINTERS.map((m) => {
+        const online = st(`binary_sensor.${m.p}_online`) === 'on';
+        const status = st(`sensor.${m.p}_print_status`);
+        const running = status === 'running';
+        const pct = Math.max(0, Math.min(100, Number(st(`sensor.${m.p}_print_progress`) ?? 0)));
+        const pic = attr(e[`camera.${m.p}_camera`], 'entity_picture') as string | undefined;
+        // Same cache-buster the security cameras use: a fresh URL every 10 s.
+        const url = online && pic ? `${pic}&est=${Math.floor(now.getTime() / 10000)}` : undefined;
+        const nozzles: ReadonlyArray<readonly [string, string]> = m.dual
+          ? [['Left', `sensor.${m.p}_left_nozzle_temperature`],
+             ['Right', `sensor.${m.p}_right_nozzle_temperature`]]
+          : [['Nozzle', `sensor.${m.p}_nozzle_temperature`]];
+
+        return (
+          <Glass key={m.p}>
+            <PanelHead label={`\u{1F5A8} ${m.label}`} right={
+              <span style={{ fontSize: 12, color: online ? (running ? T.gold : T.dim) : '#e2725b' }}>
+                {online ? (bad(status) ? 'idle' : status) : 'offline'}
+              </span>
+            } />
+
+            <div style={{
+              borderRadius: 16, overflow: 'hidden', border: `1px solid ${T.line}`,
+              background: 'rgba(0,0,0,0.4)', aspectRatio: '16/9', marginBottom: 14,
+            }}>
+              {url
+                ? <img src={url} alt={`${m.label} chamber`}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                : <div style={{ display: 'grid', placeItems: 'center', height: '100%', color: T.faint, fontSize: 12 }}>
+                    {online ? 'No signal' : 'Printer offline'}
+                  </div>}
+            </div>
+
+            {running && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: T.dim, marginBottom: 5 }}>
+                  <span>{bad(st(`sensor.${m.p}_task_name`)) ? 'Printing' : st(`sensor.${m.p}_task_name`)}</span>
+                  <span>{pct}%</span>
+                </div>
+                <div style={{ height: 6, borderRadius: 3, background: T.line, overflow: 'hidden' }}>
+                  <div style={{ width: `${pct}%`, height: '100%', background: T.gold, transition: 'width .6s ease' }} />
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: '9px 16px', fontSize: 13 }}>
+              <Stat label="Stage" value={fmt(`sensor.${m.p}_current_stage`)} />
+              <Stat label="Remaining" value={fmt(`sensor.${m.p}_remaining_time`, ' min')} />
+              <Stat label="Layer"
+                value={bad(st(`sensor.${m.p}_current_layer`)) ? '--'
+                  : `${st(`sensor.${m.p}_current_layer`)} / ${fmt(`sensor.${m.p}_total_layer_count`)}`} />
+              <Stat label="Bed" value={fmt(`sensor.${m.p}_bed_temperature`, '\u00B0')} />
+              {nozzles.map(([n, id]) => <Stat key={id} label={n} value={fmt(id, '\u00B0')} />)}
+              <Stat label="Chamber" value={fmt(`sensor.${m.p}_chamber_temperature`, '\u00B0')} />
+            </div>
+
+            {st(`binary_sensor.${m.p}_hms_errors`) === 'on' && (
+              <div style={{ marginTop: 12, fontSize: 12.5, color: '#e2725b' }}>
+                HMS error reported -- check the printer.
+              </div>
+            )}
+          </Glass>
+        );
+      })}
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, borderBottom: `1px solid ${T.line}`, paddingBottom: 6 }}>
+      <span style={{ color: T.dim }}>{label}</span>
+      <span style={{ fontWeight: 500 }}>{value}</span>
+    </div>
+  );
+}
+
+function SettingsPage({ hass, narrow, optionalPages, setOptionalPages }: {
+  hass: Hass; narrow: boolean;
+  optionalPages: readonly string[];
+  setOptionalPages: (v: string[]) => void;
+}) {
   const cols = narrow ? 1 : 2;
   const admin = hass.user?.is_admin === true;
 
@@ -3161,6 +3322,31 @@ function SettingsPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
           schedules read. Changes apply instantly, survive every UI update, and affect the
           whole household. Family members see a personal profile page here instead.
         </div>
+      </Glass>
+
+      <Glass>
+        <PanelHead label="\u{1F9E9} Optional pages" />
+        <div style={{ fontSize: 12.5, color: T.dim, lineHeight: 1.6, paddingBottom: 2 }}>
+          Hidden from everyone by default. These switches are <b style={{ color: T.text }}>yours
+          alone</b> -- turning one on adds the page to your own nav, on every device you sign in
+          on, and changes nothing for anyone else in the house.
+        </div>
+        {OPTIONAL_NAV.map((n) => {
+          const on = optionalPages.includes(n.id);
+          return (
+            <div key={n.id} style={{ padding: '14px 0', borderBottom: `1px solid ${T.line}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 14.5, fontWeight: 500 }}>{n.label}</div>
+                <div style={{ fontSize: 11.5, color: T.dim, marginTop: 2 }}>{OPTIONAL_HINT[n.id] ?? ''}</div>
+              </div>
+              <Pill active={on} onClick={() => setOptionalPages(
+                on ? optionalPages.filter((x) => x !== n.id) : [...optionalPages, n.id]
+              )}>
+                {on ? 'Shown' : 'Hidden'}
+              </Pill>
+            </div>
+          );
+        })}
       </Glass>
 
       <Glass>
