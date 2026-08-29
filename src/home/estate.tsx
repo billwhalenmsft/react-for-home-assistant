@@ -3524,6 +3524,10 @@ function PrintersPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
         // Fallback: the sliced model preview for the running job. Only exists
         // while something is loaded, so it can legitimately be absent.
         const cover = attr(e[`image.${m.p}_cover_image`], 'entity_picture') as string | undefined;
+        // No camera entity at all: the integration's camera option is off,
+        // switched off deliberately because retrying a stream the printer
+        // refuses to publish was 53% of every ERROR line in the HA log.
+        const noCam = !pic;
         const nozzles: ReadonlyArray<readonly [string, string]> = m.dual
           ? [['Left', `sensor.${m.p}_left_nozzle_temperature`],
              ['Right', `sensor.${m.p}_right_nozzle_temperature`]]
@@ -3565,16 +3569,19 @@ function PrintersPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
                   display: 'grid', placeItems: 'center', height: '100%', gap: 8,
                   color: T.faint, fontSize: 12, textAlign: 'center', padding: '0 22px',
                 }}>
-                  {!online ? <span>Printer offline</span> : failed ? (
+                  {!online ? <span>Printer offline</span> : (failed || noCam) ? (
                     <>
                       <span style={{ color: T.dim }}>No chamber video</span>
                       <span style={{ fontSize: 11, lineHeight: 1.5 }}>
-                        The printer reports its stream URL as <b>disable</b>. Bambu only
-                        publishes it in LAN Only Mode, which would cost the cloud features.
+                        Bambu only publishes a local stream in <b>LAN Only Mode</b>, which
+                        would cost the cloud features. The camera is switched off in the
+                        integration so it stops retrying.
                       </span>
-                      <Pill active={false} onClick={() => setCamFailed((f) => ({ ...f, [m.p]: false }))}>
-                        Retry
-                      </Pill>
+                      {failed && (
+                        <Pill active={false} onClick={() => setCamFailed((f) => ({ ...f, [m.p]: false }))}>
+                          Retry
+                        </Pill>
+                      )}
                     </>
                   ) : <span>No signal</span>}
                 </div>
