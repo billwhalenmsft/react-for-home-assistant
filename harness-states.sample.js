@@ -1236,3 +1236,119 @@ window.MOCK_ENTITIES = {
   "c": "x"
  }
 };
+
+// ---------------------------------------------------------------------------
+// Added for the family lists, the Sky page's Weather/Yard tabs, and richer sky
+// data. Kept as a separate Object.assign rather than folded into the dump above
+// so it stays obvious which values are hand-written and which came from a
+// generated snapshot. Everything here is invented.
+// ---------------------------------------------------------------------------
+(function () {
+  const t = 1787749000;
+  const E = (s, a) => ({ s: String(s), a: a || {}, lc: t, lu: t, c: 'x' });
+
+  Object.assign(window.MOCK_ENTITIES, {
+    // The five shared lists. A `todo` entity's STATE is the number of items
+    // still needing action, which is also what drives the panel's refetch.
+    'todo.movie_night': E(6, { friendly_name: 'Family Movie Night' }),
+    'todo.night_sky': E(9, { friendly_name: 'Night Sky' }),
+    'todo.print_queue': E(3, { friendly_name: 'Print Queue' }),
+    'todo.recipes_to_try': E(4, { friendly_name: 'Recipes to Try' }),
+    'todo.family_adventures': E(5, { friendly_name: 'Family Adventures' }),
+
+    // Outdoor conditions for the Weather tab.
+    'sensor.outdoor_temperature': E(64.2, { friendly_name: 'Outdoor Temperature', unit_of_measurement: '°F' }),
+    'sensor.outdoor_humidity': E(58, { friendly_name: 'Outdoor Humidity', unit_of_measurement: '%' }),
+    'sensor.outdoor_wind': E('NW 6.4 mph', { friendly_name: 'Outdoor Wind' }),
+    'sensor.rain_today': E(0.12, { friendly_name: 'Rain Today', unit_of_measurement: 'in' }),
+    'sensor.uv_index': E(3, { friendly_name: 'UV Index' }),
+
+    // Irrigation for the Yard tab.
+    'sensor.watering_verdict': E('Skipping — it rained yesterday', { friendly_name: 'Watering Verdict' }),
+    'binary_sensor.is_raining': E('off', { friendly_name: 'Is Raining', device_class: 'moisture' }),
+    'switch.lawn_schedule': E('on', { friendly_name: 'Lawn Schedule' }),
+    'switch.sprinkler_zone_1': E('on', { friendly_name: 'Front Yard' }),
+    'switch.sprinkler_zone_2': E('off', { friendly_name: 'Back Yard' }),
+
+    // Sky values the generated dump left as placeholders.
+    'sensor.iss_position': E('12.4, -58.9', {
+      friendly_name: 'ISS Position',
+      latitude: 12.4,
+      longitude: -58.9,
+      altitude: 421,
+      velocity: 27580,
+      visibility: 'daylight',
+      solar_lat: 7.1,
+      solar_lon: -41.2,
+      footprint: 4520,
+    }),
+    'sensor.moon_emoji': E('🌖', { friendly_name: 'Moon Emoji' }),
+    'sensor.next_launch_countdown': E('T-4 h 12 min', { friendly_name: 'Next Launch Countdown' }),
+    'sensor.next_launch_name': E('Falcon 9 · Starlink Group 15-23', { friendly_name: 'Next Launch Name' }),
+    'sensor.next_launch_detail': E('SpaceX · Vandenberg SFB, CA', { friendly_name: 'Next Launch Detail' }),
+    'sensor.next_spacex_countdown': E('T-4 h 12 min', { friendly_name: 'Next SpaceX Countdown' }),
+    'sensor.next_spacex_mission': E('Starlink Group 15-23', { friendly_name: 'Next SpaceX Mission' }),
+    'sensor.aurora_verdict': E('Quiet — Kp 2.0', { friendly_name: 'Aurora Verdict' }),
+    'sensor.planetary_k_index': E(2.0, { friendly_name: 'Planetary K Index' }),
+    'sensor.cloud_cover_pct': E(18, { friendly_name: 'Cloud Cover', unit_of_measurement: '%' }),
+    'input_number.telescope_cloud_max': E(30, { friendly_name: 'Telescope Cloud Max' }),
+  });
+
+  // Rows for each list; the harness answers `todo.get_items` from this.
+  // Night Sky summaries must match the names in src/home/skytargets.ts exactly
+  // - that match is how each row gets scored against tonight's sky.
+  const item = (uid, summary, description, done) => ({
+    uid,
+    summary,
+    description,
+    status: done ? 'completed' : 'needs_action',
+  });
+
+  window.MOCK_TODO_ITEMS = {
+    'todo.movie_night': [
+      item('m1', 'Raiders of the Lost Ark (1981)', 'Still the cleanest adventure movie ever cut.'),
+      item('m2', 'Back to the Future (1985)', 'Near-perfect screenplay construction.', true),
+      item('m3', 'The Princess Bride (1987)', 'Endlessly quotable. Works at every age.'),
+      item('m4', 'Jurassic Park (1993)', 'The moment CGI arrived.'),
+      item('m5', 'Spirited Away (2001)', 'The best animated film of the century so far.'),
+      item('m6', 'The Incredibles (2004)', 'A superhero film about a marriage.', true),
+      item('m7', 'Mad Max: Fury Road (2015)', 'Basically one chase, executed perfectly.'),
+      item('m8', 'Everything Everywhere All at Once (2022)', 'Chaotic, and it lands emotionally.'),
+    ],
+    'todo.night_sky': [
+      item('s1', 'Orion Nebula (M42)', 'Naked-eye smudge in the sword of Orion; stunning in any scope.'),
+      item('s2', 'Andromeda Galaxy (M31)', 'The farthest thing you can see unaided. 2.5 million light years.'),
+      item('s3', 'The Pleiades (M45)', 'Count the stars with the naked eye, then use binoculars.'),
+      item('s4', 'Hercules Globular Cluster (M13)', 'Half a million stars in one ball.'),
+      item('s5', 'Albireo, the gold and blue double', 'The prettiest colour contrast in the sky.'),
+      item('s6', 'The Big Dipper', 'Never sets from Minnesota. Your all-year signpost.'),
+      item('s7', 'Jupiter and its four moons', 'The moons visibly move night to night.'),
+      item('s8', 'Saturn’s rings', 'The moment that makes people buy a telescope.'),
+      item('s9', 'The Perseids', 'Peaks August 11-13. The reliable one, and it is warm out.'),
+      item('s10', 'Polaris, and true north', 'Its altitude equals your latitude.', true),
+      item('s11', 'Sirius, the brightest star', 'Twinkles hard and flashes colour when low.', true),
+    ],
+    'todo.print_queue': [
+      item('p1', 'Cable clips for the desk', 'Six of them, black.'),
+      item('p2', 'Phone stand for the kitchen', 'Test print for the big printer.'),
+      item('p3', 'Replacement knob, dryer', 'Measure first.'),
+      item('p4', 'Hose guide stakes', 'Four, for the flower bed.', true),
+    ],
+    'todo.recipes_to_try': [
+      item('r1', 'Sheet-pan chicken fajitas', 'One pan, 25 minutes, everyone assembles their own.'),
+      item('r2', 'Korean beef bowls', 'Ground beef, soy, brown sugar, rice. Fifteen minutes.'),
+      item('r3', 'Carnitas in the slow cooker', 'Crisp it under the broiler at the end.'),
+      item('r4', 'Homemade pizza dough', 'You already make pizza. Make the dough.'),
+      item('r5', 'Chili with cornbread', 'Make double. It is better the next day.', true),
+    ],
+    'todo.family_adventures': [
+      item('a1', 'The Minnesota State Fair', 'Twelve days, one giant sandbox. Go on a weekday.'),
+      item('a2', 'North Shore drive to Grand Marais', 'Highway 61 the whole way. Stop constantly.'),
+      item('a3', 'A Boundary Waters canoe trip', 'No motors, no phones. The big one.'),
+      item('a4', 'Apple orchard in October', 'Cider donuts are the actual objective.'),
+      item('a5', 'Sledding at a real hill', 'Not the backyard. A proper one.'),
+      item('a6', 'Minnehaha Falls', 'In the city, and still spectacular after a rain.', true),
+      item('a7', 'A Twins game at Target Field', 'Cheap seats, good sightlines.', true),
+    ],
+  };
+})();

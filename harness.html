@@ -4,12 +4,24 @@
 <style>html,body{margin:0;background:#0a0c0e;}</style>
 </head>
 <body>
-<!-- Sample states ship with the repo so the harness runs on a fresh clone.
-     harness-states.local.js is optional, git-ignored, and wins if present. -->
-<script src="./harness-states.sample.js"></script>
-<script src="./harness-states.local.js" onerror="void 0"></script>
 <script type="module">
-  import './dist/react-for-home-assistant.js?b=1787749024';
+  // Everything is imported with a per-load cache-buster. Static file servers
+  // hand out long-lived copies of both the bundle and the state files, and a
+  // stale states file is a nasty bug to chase: the panel renders perfectly
+  // against data you edited half an hour ago and you blame the panel.
+  const bust = Date.now();
+
+  // Sample states ship with the repo so the harness runs on a fresh clone.
+  // harness-states.local.js is optional, git-ignored, and wins if present -
+  // it loads second and overwrites window.MOCK_ENTITIES.
+  await import(`./harness-states.sample.js?b=${bust}`);
+  try {
+    await import(`./harness-states.local.js?b=${bust}`);
+  } catch {
+    /* no local dump: the sample house it is */
+  }
+
+  await import(`./dist/react-for-home-assistant.js?b=${bust}`);
 
   const fakeConn = {
     // home-assistant-js-websocket branches on haVersion to choose between
@@ -39,6 +51,23 @@
           entity_id: id, state: e.s, attributes: e.a,
           last_changed: new Date(e.lc * 1000).toISOString(), last_updated: new Date(e.lu * 1000).toISOString(),
         })));
+      }
+      // `todo.get_items` RETURNS A RESPONSE rather than changing state, and it
+      // is how every family list loads its rows. With no branch here each list
+      // renders its chrome and then "0 of 0 · Nothing on the list yet" — a
+      // convincing-looking lie about a page that works fine against real HA.
+      if (msg.type === 'call_service' && msg.domain === 'todo' && msg.service === 'get_items') {
+        const target = msg.target && msg.target.entity_id;
+        const ids = Array.isArray(target) ? target : [target];
+        const response = {};
+        for (const id of ids) {
+          response[id] = { items: (window.MOCK_TODO_ITEMS || {})[id] || [] };
+        }
+        return Promise.resolve({ context: {}, response });
+      }
+      if (msg.type === 'call_service') {
+        console.log('call_service', msg.domain + '.' + msg.service, msg.service_data, msg.target);
+        return Promise.resolve({ context: {} });
       }
       return Promise.resolve(null);
     },

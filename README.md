@@ -118,14 +118,19 @@ thing the household actually looks at.
 | **Rooms** | Favourites, then a tile per room — tap one for what's in it |
 | **Security** | Perimeter board: every door, both garages, the lock, cameras |
 | **Grow** | Tent climate, VPD, soil, per-plant stage tracking |
-| **Sky** | ISS passes, aurora, launches, moon phase, NASA imagery |
-| **Cinema** | TV, receiver and speaker control |
-| **People** | Presence for the household — and honestly, which phones aren't linked yet |
+| **Sky** | Three tabs: **Sky watch** (ISS passes, aurora, launches, NASA imagery), **Weather** (outdoor conditions, cloud cover), **Yard & watering** (irrigation zones) |
+| **Cinema** | TV, receiver and speaker control — and the family watchlist |
+| **People** | Presence for the household, plus the adventure and recipe lists |
 | **Profile** | Your own notification switches and the household's saved locations |
 | **Setup** | House-wide thresholds and schedules — administrators only |
 
-Pages are addressable by URL hash (`#security`, `#grow`, …), which is what lets a
-notification deep-link to the page that explains it.
+Pages are addressable by URL hash (`#security`, `#grow`, …), and pages with tabs take a
+second segment (`#sky/yard`, `#sky/weather`). That is what lets a notification deep-link
+to the exact surface that explains it, rather than dropping you on a page to go hunting.
+
+![The Sky page, Yard & watering tab: the watering verdict, irrigation zones and controller overrides](docs/screenshots/sky-yard.jpg)
+
+![The Sky page, Weather tab: outdoor conditions and cloud cover](docs/screenshots/sky-weather.jpg)
 
 ![The Rooms page: favourites on top, then one tile per room, each showing what is on](docs/screenshots/rooms.jpg)
 
@@ -158,6 +163,34 @@ Two hard-won gotchas are worth repeating for anyone building gesture UI here: ke
 state in a `useRef`, not `useState` (a fast drag delivers many pointer events inside one
 React tick, and batched state hands every one the same stale base), and debounce commands
 to cloud APIs — see the thermostat note under Climate.
+
+### Shared family lists
+
+![The Cinema page: the family watchlist, filterable by decade, with a random pick](docs/screenshots/cinema.jpg)
+
+Five lists — a watchlist, an observing list, a print queue, recipes and adventures — all
+render through one `ListPanel` component and all sit on **`todo` entities**, not on
+per-user storage. That choice is the whole point: `frontend/get_user_data` is scoped to
+the logged-in user, so a family list stored there would hand everybody their own private
+checkmarks. A `todo` entity is one shared list, and because it is native it stays
+editable from Home Assistant's own To-do panel and the companion app — someone can tick
+something off from a phone without ever opening the dashboard.
+
+Items arrive through `todo.get_items`, which is a service call that returns a *response*
+rather than entity state. The entity's own state is the count of items still needing
+action, which makes it a free cross-device refresh trigger: check something off anywhere
+and the count moves, which re-runs the fetch.
+
+The observing list goes further than a checklist. Each target carries real J2000
+coordinates, and the page computes its **true altitude right now** — Julian date to
+Greenwich sidereal time to local hour angle — then folds in darkness, cloud cover against
+the telescope threshold, and moon phase. So a row reads *"Up now · 63°"* or *"Below the
+horizon"* instead of making you work it out. Planets say so honestly: no ephemeris ships
+with the panel, so they get observing notes rather than a fabricated position.
+
+![The Sky page, Sky watch tab: the telescope verdict, the ISS ground track, space weather and the observing list](docs/screenshots/sky.jpg)
+
+![The People page: household presence, the adventure list and the recipe list](docs/screenshots/people.jpg)
 
 > **About the screenshots.** Every one is the **sample house** — invented rooms, invented
 > people, invented entity ids — captured from the offline harness described below. None of
@@ -283,12 +316,16 @@ more than one thing watching it.*
 Window automation here runs on **Yoolax motorized shades**, and it ended up spanning two
 radios rather than one. That was not the plan, and the reason is worth writing down.
 
-| | Three already hung | Four to come |
+| | The first three | The later four |
 |---|---|---|
-| **Radio** | Bluetooth LE | Zigbee |
-| **Stack** | Tuya BLE (Yoolax is a Tuya white-label) | Standard Zigbee, joins ZHA directly |
-| **Reaches HA via** | An ESP32 Bluetooth proxy | A USB Zigbee coordinator |
-| **Status** | 🔧 Identified, control in progress | 🔧 Coordinator live, awaiting hardware |
+| **Radio** | Bluetooth LE | Never established |
+| **Stack** | Tuya BLE (Yoolax is a Tuya white-label) | Unknown |
+| **Reaches HA via** | An ESP32 Bluetooth proxy sees them | Nothing reaches them |
+| **Status** | ⏸️ Shelved — needs a Tuya local key | ⏸️ Shelved — silent on every radio |
+
+**How this ended, so the lesson lands honestly: the shades are not automated, and that
+was the right call.** They work perfectly on their 433 MHz remotes. Everything below is
+what it cost to find that out.
 
 **Neither vendor page will tell you which one you are buying.** The three that went up
 first turned out to be BLE, and nothing in the listing said so. What settled it was putting
@@ -314,11 +351,25 @@ never been one before, which is the real reason this took weeks.
   app the blinds are paired in. Note that the *official* Tuya cloud integration is no help
   here: a BLE-only motor is not cloud-reachable without a Tuya gateway.
 
+**Then it got worse.** Four more were ordered from the same listing, believing they were a
+different comms variant. They are not distinguishable by eye, and a **280-second window
+with Zigbee permit-join and Z-Wave inclusion both open, running alongside a Bluetooth
+advertisement watch, caught nothing at all.** A factory-fresh Zigbee device announces
+itself on first power-up; these bind to their remote instead. Whatever radio is in them,
+an open stack cannot hear it.
+
 **The buying lesson, stated plainly:** shades that speak **standard Zigbee** drop into an
 open stack and are done. Shades that speak **Tuya BLE** work, but only after a proxy, a
 developer account and a key extraction — for the same money and the same-looking product.
-If you are choosing today, ask the vendor which radio ships in the box and do not accept
-"smart" as an answer.
+Worse, a single vendor listing can ship *either*, configured as an option you cannot see
+in the photos. If you are choosing today, ask which radio is in the box, get it in
+writing, and do not accept "smart" as an answer.
+
+**The route not taken, for anyone in the same hole.** All seven motors already answer one
+433 MHz remote. A single RF bridge that learns those buttons would drive every blind at
+once, indifferent to each motor's own radio — one-way only, no position feedback, and it
+cannot learn a rolling-code remote. That is a far better trade than seven key
+extractions, and it is where this would resume.
 
 **One more hardware note, since it cost three days.** A coordinator advertising both Zigbee
 and Thread runs one *or* the other depending on the firmware flashed — not both at once.
@@ -336,14 +387,20 @@ and Thread runs one *or* the other depending on the firmware flashed — not bot
 - [x] React panel with a real design system + live floorplan
 - [x] Per-person notification preferences and notification deep links
 - [x] Nightly backups with retention
-- [ ] Door/window contact sensors — finish migration off the paid service
+- [x] Door/window contact sensors — all four on Zigbee, zero dropouts over 48 h
 - [x] Zigbee coordinator live, network formed
 - [x] Bluetooth reaches the house at all — ESP32 proxy, HA's first BLE radio
 - [x] The three hung shades identified as Tuya BLE
-- [ ] Tuya BLE local keys, so those three can be driven
-- [ ] Zigbee shades: pair, group, schedule
+- [x] **Decommission the paid subscription** — the goal this whole project was named for
+- [x] Shared family lists on `todo` entities, with a real altitude engine behind the
+      observing list
+- [x] Irrigation on the panel, and the Sky page split into tabs
+- [ ] Doorbell press detection — needs a relay at the chime, since the two conductors
+      there carry no continuous power
 - [ ] Off-device backup copy
-- [ ] Decommission the paid subscription
+- [ ] Ride-through: the old panel had a battery and a cellular radio; this does not
+- [ ] Smoke and CO into Home Assistant — currently no coverage at all
+- [ ] Motorized shades — shelved by choice; the remotes work
 
 ---
 
