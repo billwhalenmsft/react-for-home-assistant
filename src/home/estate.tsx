@@ -1450,9 +1450,15 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
         <Floorplan hass={hass} />
       </Glass>
 
+      {/* The column beside the floorplan. The floorplan is by far the tallest
+          card on the page, so a two-card stack here left a visible hole on a
+          wide desktop window - and SkySummary, sitting alone on the last row,
+          left two more empty cells. Moving it up closes both: this column now
+          carries three cards, and the trailing row is exactly three wide. */}
       <div style={{ display: 'grid', gap: 18, alignContent: 'start' }}>
         <ClimateDial hass={hass} />
         <SecuritySummary hass={hass} onMore={() => go('security')} />
+        <SkySummary hass={hass} onMore={() => go('sky')} />
       </div>
 
       <Glass span={narrow ? 1 : 2}>
@@ -1465,7 +1471,6 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
       <LightingSummary hass={hass} onMore={() => go('rooms')} />
       <NowPlaying hass={hass} onMore={() => go('cinema')} />
       <GrowSummary hass={hass} onMore={() => go('grow')} />
-      <SkySummary hass={hass} onMore={() => go('sky')} />
     </div>
   );
 }
