@@ -5,6 +5,10 @@ import {
 import { createPortal } from 'react-dom';
 import { useEntities, useEntity } from '../ha/useEntities';
 import { useUserData } from '../ha/useUserData';
+import { useTodoList, type TodoItem } from '../ha/useTodoList';
+import {
+  SKY_TARGETS, verdictFor, type SkyTarget, type SkyNow,
+} from './skytargets';
 import type { Hass, HassEntity } from '../ha/types';
 import { Floorplan } from './floorplan';
 import { RoomsGrid } from './RoomsGrid';
@@ -71,6 +75,8 @@ const P = {
   home: 'M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z',
   rooms: 'M4 18h16v2H4zm0-5h16v2H4zm0-5h16v2H4zM4 3h16v2H4z',
   cinema: 'M18 3v2h-2V3H8v2H6V3H4v18h2v-2h2v2h8v-2h2v2h2V3h-2zM8 17H6v-2h2v2zm0-4H6v-2h2v2zm0-4H6V7h2v2zm10 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2z',
+  check: 'M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z',
+  shuffle: 'M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.13 11.29l-1.41 1.41 3.13 3.13L14.5 22H20v-5.5l-2.04 2.04-3.33-3.25z',
   shield: 'M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z',
   leaf: 'M17 8C8 10 5.9 16.17 3.82 21.34l1.89.66.95-2.3c.48.17.98.3 1.34.3C19 20 22 3 22 3c-1 2-8 2.25-13 3.25S2 11.5 2 13.5s1.75 3.75 1.75 3.75C7 8 17 8 17 8z',
   sky: 'M12 2l2.4 4.8L20 8l-4 3.9.9 5.4L12 14.8 7.1 17.3 8 11.9 4 8l5.6-1.2L12 2z',
@@ -376,9 +382,26 @@ function orderedNav(admin: boolean, prefs: NavPrefs) {
     .sort((a, b) => (rank.get(a.id) ?? 99) - (rank.get(b.id) ?? 99));
 }
 
-function pageFromHash(): Page {
+function hashParts(): [string, string] {
   const h = (window.location.hash || '').replace(/^#\/?/, '').split('?')[0];
-  return PAGE_IDS.has(h) ? (h as Page) : 'home';
+  const [base, section = ''] = h.split('/');
+  return [base, section];
+}
+
+function pageFromHash(): Page {
+  const [base] = hashParts();
+  return PAGE_IDS.has(base) ? (base as Page) : 'home';
+}
+
+/**
+ * The optional second hash segment: `#sky/weather` -> 'weather'.
+ *
+ * Pages that carry tabs use this so a tab is a real address - a notification
+ * about watering can open the Yard tab directly instead of dropping you on the
+ * page and making you find it.
+ */
+function sectionFromHash(): string {
+  return hashParts()[1];
 }
 
 export function EstateApp({ hass }: { hass: Hass }) {
@@ -2452,13 +2475,405 @@ function ProfilePage({ hass, narrow, admin, navPrefs, savePrefs }: {
 }
 
 function PeoplePage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
+  const cols = narrow ? 1 : 2;
   return (
     <div style={{ display: 'grid', gap: 18 }}>
       <Glass style={{ padding: 18 }}>
         <PanelHead label="The family" />
         <PeopleGrid hass={hass} narrow={narrow} />
       </Glass>
+
+      <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+        {E.adventureList && <AdventureList hass={hass} span={1} />}
+        {E.recipeList && <RecipeList hass={hass} span={1} />}
+      </div>
     </div>
+  );
+}
+
+type RowTone = 'go' | 'soon' | 'no';
+
+interface ListPanelProps {
+  hass: Hass;
+  entityId: string;
+  label: string;
+  span: number;
+  /** Past-tense word for a ticked item: "watched", "seen", "printed". */
+  doneVerb?: string;
+  filters?: ReadonlyArray<{ id: string; label: string }>;
+  match?: (item: TodoItem, filterId: string) => boolean;
+  /** Offer a random draw from the unticked pile. */
+  pick?: boolean;
+  pickEyebrow?: string;
+  /** Offer an add box. Anyone looking at the panel can put something on it. */
+  addPlaceholder?: string;
+  /** A second line per row - used by the sky list for tonight's verdict. */
+  annotate?: (item: TodoItem) => { label: string; tone: RowTone } | null;
+  sort?: (a: TodoItem, b: TodoItem) => number;
+  /** Strip decoration from the displayed title (the movie list drops the year). */
+  display?: (summary: string) => string;
+  subtitle?: (summary: string) => string | undefined;
+}
+
+/**
+ * One family list, rendered.
+ *
+ * Every list in the house is the same shape - a shared `todo` entity, ticked
+ * off by whoever gets to it first - so this is one component with switches
+ * rather than five near-identical panels. What differs per list is only what
+ * a row *means*, which is why `annotate` and `display` are injected.
+ */
+function ListPanel({
+  hass, entityId, label, span, doneVerb = 'done', filters, match, pick,
+  pickEyebrow = 'Tonight', addPlaceholder, annotate, sort, display, subtitle,
+}: ListPanelProps) {
+  const { items, loaded, setStatus, addItem } = useTodoList(hass, entityId);
+  const [filter, setFilter] = useState<string>(filters?.[0]?.id ?? 'all');
+  const [hideDone, setHideDone] = useState(false);
+  const [pickUid, setPickUid] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+
+  const scoped = filters && match ? items.filter((i) => match(i, filter)) : items;
+  const done = scoped.filter((i) => i.status === 'completed').length;
+  const pct = scoped.length ? Math.round((done / scoped.length) * 100) : 0;
+
+  let shown = hideDone ? scoped.filter((i) => i.status !== 'completed') : scoped;
+  if (sort) shown = [...shown].sort(sort);
+
+  const pickOne = () => {
+    const pool = scoped.filter((i) => i.status !== 'completed');
+    setPickUid(pool.length ? pool[Math.floor(Math.random() * pool.length)].uid : null);
+  };
+  const found = pickUid ? items.find((i) => i.uid === pickUid) : undefined;
+  const pickLive = found && found.status !== 'completed' ? found : null;
+
+  const submit = () => {
+    if (!draft.trim()) return;
+    addItem(draft);
+    setDraft('');
+  };
+
+  const toneColor = (t: RowTone) => (t === 'go' ? T.ok : t === 'soon' ? T.gold : T.faint);
+
+  return (
+    <Glass span={span}>
+      <PanelHead label={label} />
+
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 26, fontWeight: 250 }}>
+          {loaded ? `${done} of ${scoped.length}` : '—'}
+        </div>
+        <div style={{ fontSize: 13, color: T.dim }}>{doneVerb}</div>
+      </div>
+
+      <div
+        aria-hidden="true"
+        style={{ height: 4, borderRadius: 2, background: T.line, overflow: 'hidden', margin: '10px 0 14px' }}
+      >
+        <div style={{ width: `${pct}%`, height: '100%', background: T.gold, transition: 'width .3s ease' }} />
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        {filters?.map((f) => (
+          <Pill key={f.id} active={filter === f.id} onClick={() => setFilter(f.id)}>{f.label}</Pill>
+        ))}
+        <span style={{ flex: 1 }} />
+        <Pill tone="ghost" active={hideDone} onClick={() => setHideDone((v) => !v)}>
+          {hideDone ? `Hiding ${doneVerb}` : 'Show all'}
+        </Pill>
+        {pick && (
+          <Pill tone="gold" onClick={pickOne} ariaLabel={`Pick something from ${label}`}>
+            <Icon d={P.shuffle} size={14} /> Pick one
+          </Pill>
+        )}
+      </div>
+
+      {addPlaceholder && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <input
+            value={draft}
+            onChange={(ev) => setDraft(ev.target.value)}
+            onKeyDown={(ev) => { if (ev.key === 'Enter') submit(); }}
+            placeholder={addPlaceholder}
+            aria-label={addPlaceholder}
+            style={{
+              flex: 1, minWidth: 0, padding: '9px 12px', borderRadius: 10,
+              border: `1px solid ${T.line}`, background: 'rgba(255,255,255,0.04)',
+              color: T.text, font: 'inherit', fontSize: 14,
+            }}
+          />
+          <Pill onClick={submit}>Add</Pill>
+        </div>
+      )}
+
+      {pickLive && (
+        <div
+          style={{
+            marginTop: 14, padding: '14px 16px', borderRadius: 12,
+            border: `1px solid ${T.gold}`, background: T.glassHi,
+          }}
+        >
+          <div style={{ fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase', color: T.gold }}>
+            {pickEyebrow}
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 300, marginTop: 4 }}>
+            {display ? display(pickLive.summary) : pickLive.summary}
+          </div>
+          {pickLive.description && (
+            <div style={{ fontSize: 13, color: T.dim, marginTop: 2 }}>{pickLive.description}</div>
+          )}
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <Pill onClick={() => setStatus(pickLive, true)}>
+              <Icon d={P.check} size={14} /> Mark {doneVerb}
+            </Pill>
+            <Pill tone="ghost" onClick={pickOne}>Something else</Pill>
+          </div>
+        </div>
+      )}
+
+      <div style={{ marginTop: 14, maxHeight: 420, overflowY: 'auto', paddingRight: 4 }}>
+        {!loaded && <div style={{ fontSize: 13, color: T.dim }}>Loading…</div>}
+        {loaded && shown.length === 0 && (
+          <div style={{ fontSize: 13, color: T.dim }}>
+            {hideDone ? `All ${doneVerb}. Nice.` : 'Nothing on the list yet.'}
+          </div>
+        )}
+        {shown.map((item) => {
+          const ticked = item.status === 'completed';
+          const note = annotate && !ticked ? annotate(item) : null;
+          const sub = subtitle ? subtitle(item.summary) : undefined;
+          return (
+            <button
+              key={item.uid}
+              type="button"
+              className="est-lift"
+              onClick={() => setStatus(item, !ticked)}
+              aria-pressed={ticked}
+              aria-label={`${item.summary}${ticked ? `, ${doneVerb}` : ''}`}
+              style={{
+                display: 'flex', alignItems: 'flex-start', gap: 12, width: '100%',
+                textAlign: 'left', padding: '9px 6px', background: 'none', border: 'none',
+                borderBottom: `1px solid ${T.line}`, color: 'inherit', cursor: 'pointer', font: 'inherit',
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  flex: '0 0 auto', width: 20, height: 20, marginTop: 2, borderRadius: 6,
+                  border: `1px solid ${ticked ? T.gold : T.lineHi}`,
+                  background: ticked ? T.gold : 'transparent',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                {ticked && <Icon d={P.check} size={13} color={T.ground} />}
+              </span>
+              <span style={{ minWidth: 0, flex: 1 }}>
+                <span
+                  style={{
+                    display: 'block', fontSize: 15, fontWeight: 300,
+                    color: ticked ? T.faint : T.text,
+                    textDecoration: ticked ? 'line-through' : 'none',
+                  }}
+                >
+                  {display ? display(item.summary) : item.summary}
+                  {sub && <span style={{ color: T.faint, fontSize: 13 }}> · {sub}</span>}
+                </span>
+                {item.description && !ticked && (
+                  <span style={{ display: 'block', fontSize: 12.5, color: T.dim, marginTop: 1 }}>
+                    {item.description}
+                  </span>
+                )}
+                {note && (
+                  <span style={{ display: 'block', fontSize: 12, color: toneColor(note.tone), marginTop: 3 }}>
+                    {note.label}
+                  </span>
+                )}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </Glass>
+  );
+}
+
+/* ---------------------------------------------------------------- cinema */
+
+const DECADES = [
+  { id: 'all', label: 'All' },
+  { id: '1980', label: '80s' },
+  { id: '1990', label: '90s' },
+  { id: '2000', label: '00s' },
+  { id: '2010', label: '10s' },
+  { id: '2020', label: '20s' },
+] as const;
+
+/**
+ * "The Thing (1982)" -> 1982.
+ *
+ * The year lives in the item summary rather than a parallel metadata table, so
+ * the list stays a plain HA to-do list that anyone can edit from the companion
+ * app without breaking the grouping here.
+ */
+function movieYear(summary: string): number | undefined {
+  const m = /\((\d{4})\)\s*$/.exec(summary);
+  return m ? Number(m[1]) : undefined;
+}
+
+function stripYear(summary: string): string {
+  return summary.replace(/\s*\(\d{4}\)\s*$/, '');
+}
+
+function MovieNight({ hass, span }: { hass: Hass; span: number }) {
+  return (
+    <ListPanel
+      hass={hass}
+      entityId={E.movieList ?? ''}
+      label="Family Movie Night"
+      span={span}
+      doneVerb="watched"
+      filters={DECADES}
+      match={(item, id) => {
+        if (id === 'all') return true;
+        const y = movieYear(item.summary);
+        const from = Number(id);
+        return y !== undefined && y >= from && y < from + 10;
+      }}
+      pick
+      pickEyebrow="Tonight"
+      display={stripYear}
+      subtitle={(s) => {
+        const y = movieYear(s);
+        return y ? String(y) : undefined;
+      }}
+    />
+  );
+}
+
+/* ------------------------------------------------------------------- sky */
+
+const SKY_FILTERS = [
+  { id: 'all', label: 'All' },
+  { id: 'go', label: 'Up now' },
+  { id: 'fixed', label: 'Deep sky' },
+  { id: 'planet', label: 'Planets' },
+  { id: 'event', label: 'Events' },
+] as const;
+
+/**
+ * The observing list, scored against tonight.
+ *
+ * The point of putting this in the house rather than on paper is that the
+ * house already knows whether it is dark, how cloudy it is, and where every
+ * fixed target currently sits - so the list can say "up now, 63 degrees"
+ * instead of making you work it out.
+ */
+function SkyList({ hass, span }: { hass: Hass; span: number }) {
+  const ids = useMemo(
+    () => [E.cloudPct, E.cloudMax, E.moonPhase, E.issPassSummary, E.auroraVerdict,
+           E.nextLaunchName, E.homeZone, 'sun.sun'].filter((x): x is string => !!x),
+    []
+  );
+  const e = useEntities(hass, ids);
+  // Re-score every minute: altitude moves, and a stale "up now" is a lie.
+  const now = useNow(60000);
+
+  const byName = useMemo(() => {
+    const m = new Map<string, SkyTarget>();
+    for (const t of SKY_TARGETS) m.set(t.name, t);
+    return m;
+  }, []);
+
+  const conditions: SkyNow = useMemo(() => ({
+    dark: e['sun.sun']?.state === 'below_horizon',
+    cloudPct: E.cloudPct ? Number(e[E.cloudPct]?.state) : undefined,
+    cloudMax: E.cloudMax ? Number(e[E.cloudMax]?.state) : undefined,
+    moonPhase: E.moonPhase ? e[E.moonPhase]?.state : undefined,
+    // Coordinates come from `zone.home` rather than the house config: HA
+    // already knows where the house is, and duplicating it invites drift.
+    lat: Number(attr(e[E.homeZone ?? ''], 'latitude') ?? 44.72),
+    lon: Number(attr(e[E.homeZone ?? ''], 'longitude') ?? -93.38),
+    at: now,
+    issPass: E.issPassSummary ? e[E.issPassSummary]?.state : undefined,
+    aurora: E.auroraVerdict ? e[E.auroraVerdict]?.state : undefined,
+    launch: E.nextLaunchName ? e[E.nextLaunchName]?.state : undefined,
+  }), [e, now]);
+
+  const verdict = (item: TodoItem) => {
+    const t = byName.get(item.summary);
+    return t ? verdictFor(t, conditions) : null;
+  };
+  const rank = (item: TodoItem) => {
+    const v = verdict(item);
+    return v ? (v.tone === 'go' ? 0 : v.tone === 'soon' ? 1 : 2) : 3;
+  };
+
+  return (
+    <ListPanel
+      hass={hass}
+      entityId={E.skyList ?? ''}
+      label="Night Sky"
+      span={span}
+      doneVerb="seen"
+      filters={SKY_FILTERS}
+      match={(item, id) => {
+        const t = byName.get(item.summary);
+        if (id === 'all') return true;
+        if (id === 'go') return verdict(item)?.tone === 'go';
+        if (id === 'fixed') return t?.kind === 'fixed';
+        if (id === 'planet') return t?.kind === 'planet';
+        return t?.kind === 'event' || t?.kind === 'live';
+      }}
+      annotate={verdict}
+      sort={(a, b) => rank(a) - rank(b)}
+      pick
+      pickEyebrow="Go look at this"
+    />
+  );
+}
+
+/* ---------------------------------------------------------------- family */
+
+function PrintQueue({ hass, span }: { hass: Hass; span: number }) {
+  return (
+    <ListPanel
+      hass={hass}
+      entityId={E.printQueue ?? ''}
+      label="Print Queue"
+      span={span}
+      doneVerb="printed"
+      addPlaceholder="Add something to print…"
+    />
+  );
+}
+
+function RecipeList({ hass, span }: { hass: Hass; span: number }) {
+  return (
+    <ListPanel
+      hass={hass}
+      entityId={E.recipeList ?? ''}
+      label="Recipes to Try"
+      span={span}
+      doneVerb="cooked"
+      addPlaceholder="Add a recipe…"
+      pick
+      pickEyebrow="Cook this"
+    />
+  );
+}
+
+function AdventureList({ hass, span }: { hass: Hass; span: number }) {
+  return (
+    <ListPanel
+      hass={hass}
+      entityId={E.adventureList ?? ''}
+      label="Family Adventures"
+      span={span}
+      doneVerb="done"
+      addPlaceholder="Add an adventure…"
+      pick
+      pickEyebrow="Let's do this one"
+    />
   );
 }
 
@@ -2560,6 +2975,8 @@ function CinemaPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
           </div>
         </Glass>
       </div>
+
+      {E.movieList && <MovieNight hass={hass} span={cols} />}
     </div>
   );
 }
@@ -3135,15 +3552,195 @@ function TravelSky({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   );
 }
 
+/* ------------------------------------------------------ yard & watering */
+
+/**
+ * Irrigation, on the Sky page rather than a page of its own.
+ *
+ * Watering is a weather decision before it is a plumbing one - the verdict
+ * that matters is "did it rain, and is it about to", which is two cards away
+ * on the Weather tab. Rachio is the controller; the heads are Rain Bird.
+ */
+function WateringTab({ hass, narrow, span }: { hass: Hass; narrow: boolean; span: number }) {
+  const zones = E.rachioZones ?? [];
+  const ids = useMemo(
+    () => [
+      E.wateringVerdict, E.raining, E.rachioOnline, E.rachioStandby,
+      E.rachioRainDelay, E.rachioSchedule, E.outdoorRainToday,
+      ...zones.map(([, id]) => id),
+    ].filter((x): x is string => !!x),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+  const e = useEntities(hass, ids);
+  const { guard, dialog } = useGuard();
+
+  const online = !E.rachioOnline || e[E.rachioOnline]?.state === 'on';
+  const raining = E.raining ? e[E.raining]?.state === 'on' : false;
+  const running = zones.filter(([, id]) => e[id]?.state === 'on');
+
+  const toggleZone = (name: string, id: string, on: boolean) => {
+    if (on) {
+      // Stopping is always safe and immediate.
+      void hass.callService('switch', 'turn_off', {}, { entity_id: id });
+      return;
+    }
+    guard({
+      title: `Run ${name}?`,
+      body: 'This starts watering that zone now. Anyone standing in it is going to get wet.',
+      verb: 'Run it',
+      run: () => void hass.callService('switch', 'turn_on', {}, { entity_id: id }),
+    });
+  };
+
+  const ctl = ([label, id, hint]: readonly [string, string | undefined, string]) => {
+    if (!id) return null;
+    const on = e[id]?.state === 'on';
+    const unknown = !e[id] || e[id].state === 'unknown' || e[id].state === 'unavailable';
+    return (
+      <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0',
+                             borderBottom: `1px solid ${T.line}` }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14.5 }}>{label}</div>
+          <div style={{ fontSize: 11.5, color: T.dim }}>{unknown ? 'not reporting' : hint}</div>
+        </div>
+        <Pill
+          tone={on ? 'gold' : 'ghost'}
+          onClick={() => void hass.callService('switch', on ? 'turn_off' : 'turn_on', {}, { entity_id: id })}
+        >
+          {unknown ? '—' : on ? 'On' : 'Off'}
+        </Pill>
+      </div>
+    );
+  };
+
+  return (
+    <>
+      <Glass span={span}>
+        <PanelHead
+          label="Watering"
+          right={
+            <span style={{ fontSize: 11.5, color: online ? T.dim : T.alert }}>
+              {online ? 'Rachio online' : 'Rachio OFFLINE'}
+            </span>
+          }
+        />
+        <div style={{ fontSize: 26, fontWeight: 250 }}>
+          {E.wateringVerdict ? (e[E.wateringVerdict]?.state ?? '—') : '—'}
+        </div>
+        <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 10, fontSize: 13 }}>
+          <span style={{ color: raining ? T.info : T.dim }}>
+            {raining ? '🌧 Raining now' : 'Dry right now'}
+          </span>
+          {E.outdoorRainToday && (
+            <span style={{ color: T.dim }}>
+              {e[E.outdoorRainToday]?.state ?? '—'} in today
+            </span>
+          )}
+          <span style={{ color: running.length ? T.gold : T.dim }}>
+            {running.length ? `${running.length} zone${running.length > 1 ? 's' : ''} running` : 'All zones idle'}
+          </span>
+        </div>
+        {!online && (
+          <div style={{ marginTop: 12, fontSize: 12.5, color: T.alert }}>
+            The controller is not reporting to Home Assistant. Zone buttons below will
+            not do anything until it is back.
+          </div>
+        )}
+      </Glass>
+
+      <Glass span={span}>
+        <PanelHead label="Zones" right={<span style={{ fontSize: 11.5, color: T.dim }}>Rain Bird heads</span>} />
+        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: narrow ? '1fr' : '1fr 1fr' }}>
+          {zones.map(([name, id]) => {
+            const on = e[id]?.state === 'on';
+            const dead = !e[id] || e[id].state === 'unavailable';
+            return (
+              <button
+                key={id}
+                type="button"
+                className="est-lift"
+                disabled={dead}
+                onClick={() => toggleZone(name, id, on)}
+                aria-pressed={on}
+                aria-label={`${name}, ${on ? 'running' : 'idle'}`}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
+                  padding: '13px 15px', borderRadius: 12, cursor: dead ? 'default' : 'pointer',
+                  border: `1px solid ${on ? T.goldDeep : T.line}`,
+                  background: on ? 'rgba(224,179,76,0.09)' : 'rgba(255,255,255,0.04)',
+                  color: 'inherit', font: 'inherit', opacity: dead ? 0.5 : 1,
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  className={on ? 'est-pulse' : undefined}
+                  style={{
+                    width: 10, height: 10, borderRadius: '50%', flex: '0 0 auto',
+                    background: on ? T.gold : T.faint,
+                  }}
+                />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'block', fontSize: 14.5 }}>{name}</span>
+                  <span style={{ display: 'block', fontSize: 11.5, color: on ? T.gold : T.dim }}>
+                    {dead ? 'unavailable' : on ? 'Running' : 'Idle'}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </Glass>
+
+      <Glass span={span}>
+        <PanelHead label="Controller" />
+        {[
+          ['Lawn schedule', E.rachioSchedule, 'The recurring program'] as const,
+          ['Rain delay', E.rachioRainDelay, 'Skip the next scheduled run'] as const,
+          ['Standby', E.rachioStandby, 'Suspends everything until turned off'] as const,
+        ].map(ctl)}
+        <div style={{ fontSize: 11.5, color: T.faint, marginTop: 10 }}>
+          A rain skip already runs automatically from the yard's own rain sensor —
+          these are the manual overrides.
+        </div>
+      </Glass>
+      {dialog}
+    </>
+  );
+}
+
+/* ================================================================== sky */
+
+const SKY_TABS = [
+  { id: 'sky', label: 'Sky watch' },
+  { id: 'weather', label: 'Weather' },
+  { id: 'yard', label: 'Yard & watering' },
+] as const;
+type SkyTab = (typeof SKY_TABS)[number]['id'];
+
 function SkyPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const now = useNow(30000);
+  const [tab, setTab] = useState<SkyTab>(() => {
+    const s = sectionFromHash();
+    return SKY_TABS.some((t) => t.id === s) ? (s as SkyTab) : 'sky';
+  });
+
+  // replaceState rather than assigning location.hash: this must not fire
+  // `hashchange`, which the app listens to and would use to re-derive the page.
+  const pickTab = (id: SkyTab) => {
+    setTab(id);
+    const next = `${window.location.pathname}${window.location.search}#sky/${id}`;
+    window.history.replaceState(null, '', next);
+  };
   const ids = useMemo(() => [
     E.weather, E.moon, E.moonEmoji, E.aurora, E.homeZone,
     E.issPos, E.issPassSummary, E.issPassDir, E.kp, E.apod, E.auroraVerdict,
     E.nextLaunch, E.nextLaunchName, E.nextLaunchDetail, E.nextLaunchCountdown,
     E.nextSpacex, E.nextSpacexMission, E.nextSpacexCountdown,
     E.epicImage, E.epicWhen,
-  ], []);
+    E.outdoorTemp, E.outdoorHumidity, E.outdoorWind, E.outdoorRainToday,
+    E.outdoorRainYear, E.outdoorUv, E.outdoorPressure, E.outdoorStationSignal,
+  ].filter((x): x is string => !!x), []);
   const e = useEntities(hass, ids);
 
   const clouds = (attr(e[E.weather], 'cloud_coverage') as number | undefined) ?? 100;
@@ -3178,186 +3775,252 @@ function SkyPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const apodUrl = attr(apod, 'url') as string | undefined;
   const apodIsImage = (attr(apod, 'media_type') as string | undefined) !== 'video';
 
+  const reading = (id: string | undefined, label: string, unit = '') => {
+    if (!id) return null;
+    const v = e[id]?.state;
+    const dead = v === undefined || v === 'unavailable' || v === 'unknown';
+    return (
+      <div key={id}>
+        <div style={LABEL}>{label}</div>
+        <div style={{ fontSize: 22, fontWeight: 250, marginTop: 4, color: dead ? T.faint : T.text }}>
+          {dead ? '—' : `${v}${unit}`}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
-      <Glass span={cols} style={{
-        textAlign: 'center', padding: '40px 24px',
-        background: kpStrong
-          ? 'linear-gradient(180deg, rgba(122,160,224,0.16), rgba(255,255,255,0.02))'
-          : go
-            ? 'linear-gradient(180deg, rgba(122,196,143,0.10), rgba(255,255,255,0.02))'
-            : 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))',
-        borderColor: kpStrong ? 'rgba(122,160,224,0.45)' : go ? 'rgba(122,196,143,0.35)' : T.line,
-      }}>
-        <div style={{ fontSize: 60, marginBottom: 4 }} aria-hidden="true">
-          {kpStrong ? '🌌' : (e[E.moonEmoji]?.state ?? '🌙')}
-        </div>
-        <div style={{ fontSize: 32, fontWeight: 200, color: kpStrong ? T.info : go ? T.ok : clouds < 60 ? T.warn : T.dim }}>
-          {kpStrong ? 'AURORA WATCH' : go ? 'GO for the telescope' : clouds < 60 ? 'Marginal night' : 'Clouded out'}
-        </div>
-        <div style={{ fontSize: 13.5, color: T.dim, marginTop: 8 }}>
-          {activeShower(now)} · {e[E.auroraVerdict]?.state ?? 'space weather loading'}
+
+      <Glass span={cols} style={{ padding: 10 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} role="tablist" aria-label="Sky page sections">
+          {SKY_TABS.map((t) => (
+            <Pill key={t.id} active={tab === t.id} onClick={() => pickTab(t.id)}>{t.label}</Pill>
+          ))}
         </div>
       </Glass>
 
-      <TravelSky hass={hass} narrow={narrow} />
+      {tab === 'sky' && (
+        <>
+          <Glass span={cols} style={{
+            textAlign: 'center', padding: '40px 24px',
+            background: kpStrong
+              ? 'linear-gradient(180deg, rgba(122,160,224,0.16), rgba(255,255,255,0.02))'
+              : go
+                ? 'linear-gradient(180deg, rgba(122,196,143,0.10), rgba(255,255,255,0.02))'
+                : 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))',
+            borderColor: kpStrong ? 'rgba(122,160,224,0.45)' : go ? 'rgba(122,196,143,0.35)' : T.line,
+          }}>
+            <div style={{ fontSize: 60, marginBottom: 4 }} aria-hidden="true">
+              {kpStrong ? '🌌' : (e[E.moonEmoji]?.state ?? '🌙')}
+            </div>
+            <div style={{ fontSize: 32, fontWeight: 200, color: kpStrong ? T.info : go ? T.ok : clouds < 60 ? T.warn : T.dim }}>
+              {kpStrong ? 'AURORA WATCH' : go ? 'GO for the telescope' : clouds < 60 ? 'Marginal night' : 'Clouded out'}
+            </div>
+            <div style={{ fontSize: 13.5, color: T.dim, marginTop: 8 }}>
+              {activeShower(now)} · {e[E.auroraVerdict]?.state ?? 'space weather loading'}
+            </div>
+          </Glass>
 
-      <Glass span={cols} style={{ padding: '14px 16px 8px' }}>
-        <PanelHead label="The sky at home" />
-        <SkyBanner hass={hass} />
-      </Glass>
+          <TravelSky hass={hass} narrow={narrow} />
 
-      {/* ---------------------------------------------------- the map */}
-      <Glass span={cols} style={{ padding: 16 }}>
-        <PanelHead
-          label="ISS · live ground track"
-          right={
-            <span style={{ fontSize: 11.5, color: T.dim }}>
-              {iss
-                ? `${Math.round(iss.altitude ?? 0)} km · ${Math.round(iss.velocity ?? 0).toLocaleString()} km/h · ${iss.visibility === 'daylight' ? 'in sunlight' : 'in shadow'}`
-                : 'awaiting telemetry'}
-            </span>
-          }
-        />
-        <IssMap iss={iss} homeLat={homeLat} homeLon={homeLon} />
-        <div style={{ fontSize: 11, color: T.faint, marginTop: 8 }}>
-          Shaded band is real night, solved from the sub-solar point. The ring is the
-          station's horizon — when it overlaps Home and the sky here is dark, it is overhead.
-        </div>
-      </Glass>
+          {/* ---------------------------------------------------- the map */}
+          <Glass span={cols} style={{ padding: 16 }}>
+            <PanelHead
+              label="ISS · live ground track"
+              right={
+                <span style={{ fontSize: 11.5, color: T.dim }}>
+                  {iss
+                    ? `${Math.round(iss.altitude ?? 0)} km · ${Math.round(iss.velocity ?? 0).toLocaleString()} km/h · ${iss.visibility === 'daylight' ? 'in sunlight' : 'in shadow'}`
+                    : 'awaiting telemetry'}
+                </span>
+              }
+            />
+            <IssMap iss={iss} homeLat={homeLat} homeLon={homeLon} />
+            <div style={{ fontSize: 11, color: T.faint, marginTop: 8 }}>
+              Shaded band is real night, solved from the sub-solar point. The ring is the
+              station's horizon — when it overlaps Home and the sky here is dark, it is overhead.
+            </div>
+          </Glass>
 
-      {/* ------------------------------------------------- next pass */}
-      <Glass>
-        <PanelHead label="Next visible pass" />
-        <div style={{ fontSize: 21, fontWeight: 300 }}>{e[E.issPassSummary]?.state ?? '—'}</div>
-        <div style={{ fontSize: 12.5, color: T.dim, marginTop: 6 }}>{e[E.issPassDir]?.state ?? '—'}</div>
-        <div style={{ fontSize: 11, color: T.faint, marginTop: 8 }}>
-          Above 40° and after dark is worth walking outside for.
-        </div>
-      </Glass>
+          {/* ------------------------------------------------- next pass */}
+          <Glass>
+            <PanelHead label="Next visible pass" />
+            <div style={{ fontSize: 21, fontWeight: 300 }}>{e[E.issPassSummary]?.state ?? '—'}</div>
+            <div style={{ fontSize: 12.5, color: T.dim, marginTop: 6 }}>{e[E.issPassDir]?.state ?? '—'}</div>
+            <div style={{ fontSize: 11, color: T.faint, marginTop: 8 }}>
+              Above 40° and after dark is worth walking outside for.
+            </div>
+          </Glass>
 
-      {/* ------------------------------------------------ space weather */}
-      <Glass style={{ textAlign: 'center' }}>
-        <PanelHead label="Planetary Kp" />
-        <div style={{ fontSize: 46, fontWeight: 200, color: kp >= 5 ? T.info : kp >= 4 ? T.warn : T.text }}>
-          {kp < 0 ? '—' : kp.toFixed(1)}
-        </div>
-        <div style={{
-          height: 6, borderRadius: 3, marginTop: 10, overflow: 'hidden',
-          background: 'rgba(255,255,255,0.10)',
-        }}>
-          <div style={{
-            width: `${Math.max(0, Math.min(kp, 9)) / 9 * 100}%`, height: '100%',
-            background: kp >= 5 ? T.info : kp >= 4 ? T.warn : T.ok,
-          }} />
-        </div>
-        <div style={{ fontSize: 11, color: T.dim, marginTop: 6 }}>Kp 5+ reaches Minnesota</div>
-      </Glass>
+          {/* ------------------------------------------------ space weather */}
+          <Glass style={{ textAlign: 'center' }}>
+            <PanelHead label="Planetary Kp" />
+            <div style={{ fontSize: 46, fontWeight: 200, color: kp >= 5 ? T.info : kp >= 4 ? T.warn : T.text }}>
+              {kp < 0 ? '—' : kp.toFixed(1)}
+            </div>
+            <div style={{
+              height: 6, borderRadius: 3, marginTop: 10, overflow: 'hidden',
+              background: 'rgba(255,255,255,0.10)',
+            }}>
+              <div style={{
+                width: `${Math.max(0, Math.min(kp, 9)) / 9 * 100}%`, height: '100%',
+                background: kp >= 5 ? T.info : kp >= 4 ? T.warn : T.ok,
+              }} />
+            </div>
+            <div style={{ fontSize: 11, color: T.dim, marginTop: 6 }}>Kp 5+ reaches Minnesota</div>
+          </Glass>
 
-      <Glass style={{ textAlign: 'center' }}>
-        <PanelHead label="Cloud cover" />
-        <div style={{ fontSize: 46, fontWeight: 200 }}>{Math.round(clouds)}%</div>
-        <div style={{ fontSize: 11.5, color: T.dim, marginTop: 4 }}>&lt; 30% is telescope-grade</div>
-      </Glass>
+          <Glass style={{ textAlign: 'center' }}>
+            <PanelHead label="Moon" />
+            <div style={{ fontSize: 42, marginBottom: 2 }} aria-hidden="true">{e[E.moonEmoji]?.state ?? ''}</div>
+            <div style={{ fontSize: 19, fontWeight: 300 }}>{titleize(e[E.moon]?.state)}</div>
+            <div style={{ fontSize: 11.5, color: moonOk ? T.ok : T.warn, marginTop: 4 }}>
+              {moonOk ? 'Dark enough for deep-sky' : 'Bright — planets & doubles only'}
+            </div>
+          </Glass>
 
-      <Glass style={{ textAlign: 'center' }}>
-        <PanelHead label="Moon" />
-        <div style={{ fontSize: 42, marginBottom: 2 }} aria-hidden="true">{e[E.moonEmoji]?.state ?? ''}</div>
-        <div style={{ fontSize: 19, fontWeight: 300 }}>{titleize(e[E.moon]?.state)}</div>
-        <div style={{ fontSize: 11.5, color: moonOk ? T.ok : T.warn, marginTop: 4 }}>
-          {moonOk ? 'Dark enough for deep-sky' : 'Bright — planets & doubles only'}
-        </div>
-      </Glass>
+          {/* ------------------------------------------------ launches */}
+          <Glass span={narrow ? 1 : 2}>
+            <PanelHead
+              label="Launch window"
+              right={<span style={{ fontSize: 11.5, color: T.dim }}>worldwide, next up</span>}
+            />
+            <div style={{ display: 'grid', gap: 14, gridTemplateColumns: narrow ? '1fr' : '1fr 1fr' }}>
+              {([
+                [E.nextLaunchCountdown, E.nextLaunchName, E.nextLaunchDetail, 'Next off the pad'],
+                [E.nextSpacexCountdown, E.nextSpacexMission, null, 'Next SpaceX'],
+              ] as const).map(([cd, name, detail, label]) => {
+                const clock = e[cd]?.state ?? '—';
+                const soon = /T-\d+ min|lifting off|in flight/.test(clock);
+                return (
+                  <div key={label} style={{
+                    padding: '14px 16px', borderRadius: 12,
+                    border: `1px solid ${soon ? T.goldDeep : T.line}`,
+                    background: soon ? 'rgba(224,179,76,0.07)' : 'rgba(255,255,255,0.04)',
+                  }}>
+                    <div style={LABEL}>{label}</div>
+                    <div style={{
+                      fontSize: 27, fontWeight: 200, marginTop: 6,
+                      color: soon ? T.gold : T.text, fontVariantNumeric: 'tabular-nums',
+                    }}>
+                      {clock}
+                    </div>
+                    <div style={{ fontSize: 13, marginTop: 6, lineHeight: 1.4 }}>{e[name]?.state ?? '—'}</div>
+                    {detail ? (
+                      <div style={{ fontSize: 11.5, color: T.dim, marginTop: 4 }}>{e[detail]?.state ?? ''}</div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 11, color: T.faint, marginTop: 10 }}>
+              One push fires 15 minutes before the next launch — not for all ~360 on the board.
+            </div>
+          </Glass>
 
-      {/* ------------------------------------------------ launches */}
-      <Glass span={narrow ? 1 : 2}>
-        <PanelHead
-          label="Launch window"
-          right={<span style={{ fontSize: 11.5, color: T.dim }}>worldwide, next up</span>}
-        />
-        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: narrow ? '1fr' : '1fr 1fr' }}>
-          {([
-            [E.nextLaunchCountdown, E.nextLaunchName, E.nextLaunchDetail, 'Next off the pad'],
-            [E.nextSpacexCountdown, E.nextSpacexMission, null, 'Next SpaceX'],
-          ] as const).map(([cd, name, detail, label]) => {
-            const clock = e[cd]?.state ?? '—';
-            const soon = /T-\d+ min|lifting off|in flight/.test(clock);
-            return (
-              <div key={label} style={{
-                padding: '14px 16px', borderRadius: 12,
-                border: `1px solid ${soon ? T.goldDeep : T.line}`,
-                background: soon ? 'rgba(224,179,76,0.07)' : 'rgba(255,255,255,0.04)',
-              }}>
-                <div style={LABEL}>{label}</div>
-                <div style={{
-                  fontSize: 27, fontWeight: 200, marginTop: 6,
-                  color: soon ? T.gold : T.text, fontVariantNumeric: 'tabular-nums',
-                }}>
-                  {clock}
-                </div>
-                <div style={{ fontSize: 13, marginTop: 6, lineHeight: 1.4 }}>{e[name]?.state ?? '—'}</div>
-                {detail ? (
-                  <div style={{ fontSize: 11.5, color: T.dim, marginTop: 4 }}>{e[detail]?.state ?? ''}</div>
-                ) : null}
+          {/* --------------------------------------------- EPIC full disc */}
+          <Glass style={{ padding: 16 }}>
+            <PanelHead
+              label="Earth, from a million miles"
+              right={<span style={{ fontSize: 11, color: T.dim }}>{(e[E.epicWhen]?.state ?? '').slice(0, 10)}</span>}
+            />
+            {e[E.epicImage]?.state?.startsWith('http') ? (
+              <img
+                src={e[E.epicImage].state}
+                alt="NASA EPIC full-disc image of Earth from the DSCOVR satellite"
+                loading="lazy"
+                style={{ width: '100%', borderRadius: 10, display: 'block', background: '#000' }}
+              />
+            ) : (
+              <div style={{ fontSize: 12.5, color: T.dim, padding: '18px 0' }}>Waiting for DSCOVR.</div>
+            )}
+            <div style={{ fontSize: 11, color: T.faint, marginTop: 8 }}>
+              DSCOVR sits at L1 and photographs the entire sunlit face of the planet once a day.
+            </div>
+          </Glass>
+
+          {/* ------------------------------------------------------ APOD */}
+          <Glass span={narrow ? 1 : 2} style={{ padding: 16 }}>
+            <PanelHead
+              label="NASA · picture of the day"
+              right={<span style={{ fontSize: 11.5, color: T.dim }}>{(attr(apod, 'date') as string) ?? ''}</span>}
+            />
+            {apodUrl && apodIsImage ? (
+              <img
+                src={apodUrl}
+                alt={apod?.state ?? 'NASA astronomy picture of the day'}
+                loading="lazy"
+                style={{ width: '100%', borderRadius: 10, display: 'block', maxHeight: 360, objectFit: 'cover' }}
+              />
+            ) : (
+              <div style={{ fontSize: 12.5, color: T.dim, padding: '18px 0' }}>
+                {apodUrl ? "Today's entry is a video — open it on apod.nasa.gov." : 'Waiting for NASA.'}
               </div>
-            );
-          })}
-        </div>
-        <div style={{ fontSize: 11, color: T.faint, marginTop: 10 }}>
-          One push fires 15 minutes before the next launch — not for all ~360 on the board.
-        </div>
-      </Glass>
+            )}
+            <div style={{ fontSize: 15, fontWeight: 500, marginTop: 10 }}>{apod?.state ?? ''}</div>
+            <div style={{ fontSize: 12, color: T.dim, marginTop: 6, lineHeight: 1.5 }}>
+              {((attr(apod, 'explanation') as string) ?? '').slice(0, 320)}
+              {((attr(apod, 'explanation') as string) ?? '').length > 320 ? '…' : ''}
+            </div>
+            {attr(apod, 'copyright') ? (
+              <div style={{ fontSize: 10.5, color: T.faint, marginTop: 6 }}>
+                © {String(attr(apod, 'copyright')).trim()}
+              </div>
+            ) : null}
+          </Glass>
 
-      {/* --------------------------------------------- EPIC full disc */}
-      <Glass style={{ padding: 16 }}>
-        <PanelHead
-          label="Earth, from a million miles"
-          right={<span style={{ fontSize: 11, color: T.dim }}>{(e[E.epicWhen]?.state ?? '').slice(0, 10)}</span>}
-        />
-        {e[E.epicImage]?.state?.startsWith('http') ? (
-          <img
-            src={e[E.epicImage].state}
-            alt="NASA EPIC full-disc image of Earth from the DSCOVR satellite"
-            loading="lazy"
-            style={{ width: '100%', borderRadius: 10, display: 'block', background: '#000' }}
-          />
-        ) : (
-          <div style={{ fontSize: 12.5, color: T.dim, padding: '18px 0' }}>Waiting for DSCOVR.</div>
-        )}
-        <div style={{ fontSize: 11, color: T.faint, marginTop: 8 }}>
-          DSCOVR sits at L1 and photographs the entire sunlit face of the planet once a day.
-        </div>
-      </Glass>
+          {E.skyList && <SkyList hass={hass} span={cols} />}
+        </>
+      )}
 
-      {/* ------------------------------------------------------ APOD */}
-      <Glass span={narrow ? 1 : 2} style={{ padding: 16 }}>
-        <PanelHead
-          label="NASA · picture of the day"
-          right={<span style={{ fontSize: 11.5, color: T.dim }}>{(attr(apod, 'date') as string) ?? ''}</span>}
-        />
-        {apodUrl && apodIsImage ? (
-          <img
-            src={apodUrl}
-            alt={apod?.state ?? 'NASA astronomy picture of the day'}
-            loading="lazy"
-            style={{ width: '100%', borderRadius: 10, display: 'block', maxHeight: 360, objectFit: 'cover' }}
-          />
-        ) : (
-          <div style={{ fontSize: 12.5, color: T.dim, padding: '18px 0' }}>
-            {apodUrl ? "Today's entry is a video — open it on apod.nasa.gov." : 'Waiting for NASA.'}
-          </div>
-        )}
-        <div style={{ fontSize: 15, fontWeight: 500, marginTop: 10 }}>{apod?.state ?? ''}</div>
-        <div style={{ fontSize: 12, color: T.dim, marginTop: 6, lineHeight: 1.5 }}>
-          {((attr(apod, 'explanation') as string) ?? '').slice(0, 320)}
-          {((attr(apod, 'explanation') as string) ?? '').length > 320 ? '…' : ''}
-        </div>
-        {attr(apod, 'copyright') ? (
-          <div style={{ fontSize: 10.5, color: T.faint, marginTop: 6 }}>
-            © {String(attr(apod, 'copyright')).trim()}
-          </div>
-        ) : null}
-      </Glass>
+      {tab === 'weather' && (
+        <>
+          <Glass span={cols} style={{ padding: '14px 16px 8px' }}>
+            <PanelHead label="The sky at home" />
+            <SkyBanner hass={hass} />
+          </Glass>
+
+          <Glass span={narrow ? 1 : 2}>
+            <PanelHead
+              label="Outdoors now"
+              right={
+                E.outdoorStationSignal ? (
+                  <span style={{ fontSize: 11, color: T.faint }}>
+                    station link {e[E.outdoorStationSignal]?.state ?? '—'}%
+                  </span>
+                ) : undefined
+              }
+            />
+            <div style={{
+              display: 'grid', gap: 16,
+              gridTemplateColumns: `repeat(${narrow ? 2 : 4}, minmax(0,1fr))`,
+            }}>
+              {reading(E.outdoorTemp, 'Temperature', '°')}
+              {reading(E.outdoorHumidity, 'Humidity', '%')}
+              {reading(E.outdoorWind, 'Wind')}
+              {reading(E.outdoorUv, 'UV index')}
+              {reading(E.outdoorRainToday, 'Rain today', '″')}
+              {reading(E.outdoorRainYear, 'Rain this year', '″')}
+              {reading(E.outdoorPressure, 'Pressure', ' inHg')}
+            </div>
+            <div style={{ fontSize: 11, color: T.faint, marginTop: 12, lineHeight: 1.5 }}>
+              These come off an Ecowitt WH69 array reaching our gateway over RF. We never
+              bought one, and it arrives far weaker than our own sensors — so it is very
+              likely a neighbour's station the gateway adopted. Real readings, taken
+              nearby, but they could disappear without notice.
+            </div>
+          </Glass>
+
+          <Glass style={{ textAlign: 'center' }}>
+            <PanelHead label="Cloud cover" />
+            <div style={{ fontSize: 46, fontWeight: 200 }}>{Math.round(clouds)}%</div>
+            <div style={{ fontSize: 11.5, color: T.dim, marginTop: 4 }}>&lt; 30% is telescope-grade</div>
+          </Glass>
+        </>
+      )}
+
+      {tab === 'yard' && <WateringTab hass={hass} narrow={narrow} span={cols} />}
     </div>
   );
 }
@@ -3619,6 +4282,8 @@ function PrintersPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
           </Glass>
         );
       })}
+
+      {E.printQueue && <PrintQueue hass={hass} span={cols} />}
     </div>
   );
 }

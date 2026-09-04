@@ -118,7 +118,6 @@ export interface EntityMap {
   phoneBatt: string;
   phone: string;
   blink: string;
-  panel: string;
   lock: string;
   garage1: string;
   garage2: string;
@@ -155,6 +154,39 @@ export interface EntityMap {
   marantz: string;
   sonos: ReadonlyArray<Named>;
   cams: ReadonlyArray<Named>;
+  /** `todo` list entities backing the family lists. All optional: each page
+   *  simply omits its section when the entity is not configured, which keeps
+   *  the public sample build renderable without inventing lists. */
+  movieList?: string;
+  skyList?: string;
+  printQueue?: string;
+  recipeList?: string;
+  adventureList?: string;
+
+  /** Conditions the Night Sky list needs to judge "is it worth going out". */
+  cloudPct?: string;
+  cloudMax?: string;
+  moonPhase?: string;
+
+  /** Outdoor readings for the Sky page's Weather tab. All optional - the tab
+   *  drops any card whose entity is not configured. */
+  outdoorTemp?: string;
+  outdoorHumidity?: string;
+  outdoorWind?: string;
+  outdoorRainToday?: string;
+  outdoorRainYear?: string;
+  outdoorUv?: string;
+  outdoorPressure?: string;
+  outdoorStationSignal?: string;
+
+  /** Irrigation, for the Sky page's Yard tab. */
+  wateringVerdict?: string;
+  raining?: string;
+  rachioOnline?: string;
+  rachioStandby?: string;
+  rachioRainDelay?: string;
+  rachioSchedule?: string;
+  rachioZones?: ReadonlyArray<Named>;
 
   soil: string;
   soilBatt: string;
