@@ -1415,6 +1415,113 @@ function SkyBanner({ hass, compact }: { hass: Hass; compact?: boolean }) {
 
 /* ================================================================= home */
 
+/* ================================================================ scenes */
+
+/*
+ * What each configurable scene is actually made of.
+ *
+ * These ids come from packages/scene_kit.yaml, which ships as one unit with
+ * this page, so the table lives here rather than in house/ - the same call the
+ * printer table makes. A house without that package simply has no matching
+ * entities, and every step then reads as off.
+ *
+ * `does` is phrased as a clause, lower case and with no full stop, because the
+ * confirm dialog stitches the enabled ones into one sentence. That is the
+ * point of the arrangement: the dialog cannot drift from the behaviour,
+ * because both are generated from the switches the script itself reads.
+ */
+type SceneKey = 'openup' | 'lockup' | 'goodnight' | 'morning';
+
+interface SceneStep { flag: string; label: string; does: string; hint: string }
+interface SceneSpec { label: string; note: string; steps: SceneStep[] }
+
+const SCENE_STEPS: Record<SceneKey, SceneSpec> = {
+  openup: {
+    label: 'Open Up',
+    note: 'The counterpart to Lockup. It never unlocks anything.',
+    steps: [
+      { flag: 'input_boolean.scene_openup_wake', label: 'Leave sleep mode',
+        does: 'takes Adaptive Lighting out of sleep mode',
+        hint: 'Sleep mode pins the house to its dim night values, so this has to happen before the lights come up.' },
+      { flag: 'input_boolean.scene_openup_lights', label: 'Lights to the hour',
+        does: 'brings the lights up to the colour and brightness Adaptive Lighting wants right now',
+        hint: 'Not a fixed scene. Press it at breakfast and again at teatime and you get two different rooms, both right.' },
+      { flag: 'input_boolean.scene_openup_cameras', label: 'Disarm indoor cameras',
+        does: 'disarms the indoor cameras',
+        hint: 'Off by default. This is a security action on a lighting button, so it is opt-in.' },
+      { flag: 'input_boolean.scene_openup_receipt', label: 'Confirm on phone',
+        does: 'sends a confirmation to your phone',
+        hint: 'A receipt for a button you pressed, so it ignores the per-person alert mutes.' },
+    ],
+  },
+  lockup: {
+    label: 'Lockup',
+    note: 'The last thing pressed at night.',
+    steps: [
+      { flag: 'input_boolean.scene_lockup_lock', label: 'Lock the front door',
+        does: 'locks the Yale',
+        hint: 'The Z-Wave deadbolt itself, not the cloud mirror of it.' },
+      { flag: 'input_boolean.scene_lockup_garages', label: 'Close the garage doors',
+        does: 'closes both garage doors',
+        hint: 'Both ratgdo boards. Doors already shut are left alone.' },
+      { flag: 'input_boolean.scene_lockup_lights', label: 'Turn every light off',
+        does: 'turns every light off',
+        hint: 'Lutron and the main-floor Hue group together.' },
+      { flag: 'input_boolean.scene_lockup_receipt', label: 'Confirm on phone',
+        does: 'sends a confirmation to your phone',
+        hint: 'Waits twenty seconds first, so the garage doors have stopped moving before it reports on them.' },
+    ],
+  },
+  goodnight: {
+    label: 'Goodnight',
+    note: 'Winding the house down, without the security half.',
+    steps: [
+      { flag: 'input_boolean.scene_goodnight_sleepmode', label: 'Adaptive Lighting to sleep mode',
+        does: 'puts Adaptive Lighting into sleep mode',
+        hint: 'Anything switched on afterwards comes up dim and amber instead of bright.' },
+      { flag: 'input_boolean.scene_goodnight_lights', label: 'Turn every light off',
+        does: 'turns every light off',
+        hint: 'The same all-off that Lockup uses.' },
+      { flag: 'input_boolean.scene_goodnight_media', label: 'Shut down TV and receiver',
+        does: 'shuts down the Frame and the Marantz',
+        hint: 'Kept separate so a film can finish after the lights are out.' },
+    ],
+  },
+  morning: {
+    label: 'Good Morning',
+    note: 'Deliberately bright, where Open Up is deliberately right for the hour.',
+    steps: [
+      { flag: 'input_boolean.scene_morning_wake', label: 'Leave sleep mode',
+        does: 'takes Adaptive Lighting out of sleep mode',
+        hint: 'The reverse of the Goodnight step.' },
+      { flag: 'input_boolean.scene_morning_cameras', label: 'Disarm indoor cameras',
+        does: 'disarms the indoor cameras',
+        hint: 'On by default here, because this button means the household is up.' },
+      { flag: 'input_boolean.scene_morning_lights', label: 'Bring the lights up',
+        does: 'brings the main floor up to the energize scene',
+        hint: 'A fixed bright scene on purpose. Use Open Up when you want the hour-appropriate one instead.' },
+    ],
+  },
+};
+
+/**
+ * The sentence shown before a scene runs, built from the steps still switched
+ * on. The all-off case is spelled out rather than returned empty: a confirm
+ * dialog that says nothing is worse than one admitting the button is empty.
+ */
+function useSceneSummary(hass: Hass, key: SceneKey): string {
+  const steps = SCENE_STEPS[key].steps;
+  const ids = useMemo(() => steps.map((s) => s.flag), [steps]);
+  const ents = useEntities(hass, ids);
+  const on = steps.filter((s) => ents[s.flag]?.state === 'on').map((s) => s.does);
+
+  if (on.length === 0) return 'Every step of this scene is switched off in Setup, so it will do nothing.';
+  const list = on.length === 1
+    ? on[0]
+    : on.slice(0, -1).join(', ') + ' and ' + on[on.length - 1];
+  return list.charAt(0).toUpperCase() + list.slice(1) + '.';
+}
+
 function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: Page) => void }) {
   const attention = useAttention(hass);
   const cols = narrow ? 1 : 3;
@@ -1422,6 +1529,8 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
   // exist as a fact. What DOES exist is which one this surface last ran, and
   // that is the honest thing to show - a scene that stays lit after you tap it.
   const [lastScene, setLastScene] = useState<string | null>(null);
+  const openUpSays = useSceneSummary(hass, 'openup');
+  const lockupSays = useSceneSummary(hass, 'lockup');
 
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
@@ -1439,9 +1548,18 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
             />
           ))}
           <span style={{ flex: 1 }} />
+          {/* Open Up and Lockup are a pair: the first thing pressed in the
+              morning and the last thing at night. Open Up carries the bulb
+              rather than the unlock icon, because it touches no lock. */}
+          {HOUSE.openupScript && (
+            <FirePill
+              hass={hass} script={HOUSE.openupScript} label="Open Up" big icon={P.bulb}
+              confirm={openUpSays}
+            />
+          )}
           <FirePill
             hass={hass} script={HOUSE.lockupScript} label="Lockup" tone="gold" big icon={P.lock}
-            confirm="Locks the Yale, closes both garage doors, and turns every light off."
+            confirm={lockupSays}
           />
         </div>
       </Glass>
@@ -4253,6 +4371,65 @@ function SettingAutomationToggle({ hass, entity, label, hint }: {
   );
 }
 
+
+/*
+ * A plain input_boolean switch. Nearly the same shape as the automation
+ * toggle above, but deliberately not shared with it: that one reads "Alerting
+ * / Muted", which is the right word pair for an alert and the wrong one for a
+ * step in a scene. Merging them would cost a `kind` prop and a label map to
+ * save nine lines.
+ */
+function SettingBooleanToggle({ hass, entity, label, hint }: {
+  hass: Hass; entity: string; label: string; hint: string;
+}) {
+  const ent = useEntity(hass, entity);
+  const on = ent?.state === 'on';
+  const missing = ent === undefined;
+  return (
+    <div style={{ padding: '14px 0', borderBottom: `1px solid ${T.line}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+      <div>
+        <div style={{ fontSize: 14.5, fontWeight: 500 }}>{label}</div>
+        <div style={{ fontSize: 11.5, color: T.dim, marginTop: 2 }}>
+          {missing ? 'This switch does not exist in Home Assistant yet.' : hint}
+        </div>
+      </div>
+      <Pill
+        active={on}
+        onClick={() => { if (!missing) void hass.callService('input_boolean', on ? 'turn_off' : 'turn_on', {}, { entity_id: entity }); }}
+      >
+        {missing ? '--' : on ? 'On' : 'Off'}
+      </Pill>
+    </div>
+  );
+}
+
+/*
+ * One scene's worth of steps, with the sentence its confirm dialog will show
+ * printed at the top. Seeing that sentence change as you flip switches is the
+ * whole feedback loop -- you are editing the button's behaviour and reading
+ * the result in the same glance.
+ */
+function SceneSetup({ hass, sceneKey }: { hass: Hass; sceneKey: SceneKey }) {
+  const spec = SCENE_STEPS[sceneKey];
+  const says = useSceneSummary(hass, sceneKey);
+  return (
+    <Glass>
+      <PanelHead label={spec.label} />
+      <div style={{ fontSize: 11.5, color: T.faint, lineHeight: 1.6, paddingBottom: 10 }}>{spec.note}</div>
+      <div style={{
+        fontSize: 12.5, color: T.dim, lineHeight: 1.6, padding: '10px 12px',
+        border: `1px solid ${T.line}`, borderRadius: 8, marginBottom: 4,
+      }}>
+        <span style={{ ...LABEL, display: 'block', marginBottom: 4 }}>Before it runs, it will say</span>
+        {says}
+      </div>
+      {spec.steps.map((st) => (
+        <SettingBooleanToggle key={st.flag} hass={hass} entity={st.flag} label={st.label} hint={st.hint} />
+      ))}
+    </Glass>
+  );
+}
+
 /* ============================================================== printers */
 
 /*
@@ -4482,6 +4659,21 @@ function SettingsPage({ hass, narrow, prefs, savePrefs }: {
         <SettingSlider hass={hass} entity="input_number.telescope_cloud_max"
           label="Telescope cloud ceiling" hint="Telescope Tonight only fires below this cloud cover." />
       </Glass>
+
+      <Glass span={cols} style={{ padding: '16px 22px' }}>
+        <PanelHead label="🎬 Scenes" />
+        <div style={{ fontSize: 13, color: T.dim, lineHeight: 1.7 }}>
+          Every scene button is a list of steps, and each step below can be switched off.
+          The confirmation shown before a scene runs is assembled from whatever is still
+          on, so it always describes what will actually happen rather than what the button
+          was called when it was written.
+        </div>
+      </Glass>
+
+      <SceneSetup hass={hass} sceneKey="openup" />
+      <SceneSetup hass={hass} sceneKey="lockup" />
+      <SceneSetup hass={hass} sceneKey="goodnight" />
+      <SceneSetup hass={hass} sceneKey="morning" />
 
       <Glass>
         <PanelHead label="🌗 Lighting autopilot" />

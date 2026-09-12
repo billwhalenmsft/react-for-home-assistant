@@ -20,6 +20,7 @@ export const SAMPLE_HOUSE: HouseConfig = {
   name: 'Maple Street',
   street: 'Maple Street',
   lockupScript: 'script.lockup',
+  openupScript: 'script.open_up',
   locality: 'Chicago, IL',
   // Placeholder text in the Locations form. A city centre, not anybody's home.
   sampleCoords: { lat: '41.8781', lon: '-87.6298' },

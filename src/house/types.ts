@@ -251,6 +251,12 @@ export interface HouseConfig {
   locality: string;
   /** The one script the Lockup button fires. */
   lockupScript: string;
+  /**
+   * The script behind Open Up, Lockup's counterpart. Optional: a house that
+   * has not built one simply does not get the button, rather than getting a
+   * button that fires nothing.
+   */
+  openupScript?: string;
   /** Two example coordinates, used only as placeholder text in the Locations form. */
   sampleCoords: { lat: string; lon: string };
   /**
