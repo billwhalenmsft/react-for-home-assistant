@@ -101,6 +101,7 @@ export const SAMPLE_HOUSE: HouseConfig = {
     printQueue: 'todo.print_queue',
     recipeList: 'todo.recipes_to_try',
     adventureList: 'todo.family_adventures',
+    guitarList: 'todo.guitar_song_of_the_week',
     cloudPct: 'sensor.cloud_coverage',
     cloudMax: 'input_number.telescope_cloud_max',
     moonPhase: 'sensor.moon_phase',

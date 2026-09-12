@@ -76,6 +76,7 @@ const P = {
   rooms: 'M4 18h16v2H4zm0-5h16v2H4zm0-5h16v2H4zM4 3h16v2H4z',
   cinema: 'M18 3v2h-2V3H8v2H6V3H4v18h2v-2h2v2h8v-2h2v2h2V3h-2zM8 17H6v-2h2v2zm0-4H6v-2h2v2zm0-4H6V7h2v2zm10 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2z',
   check: 'M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z',
+  music: 'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z',
   shuffle: 'M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.13 11.29l-1.41 1.41 3.13 3.13L14.5 22H20v-5.5l-2.04 2.04-3.33-3.25z',
   shield: 'M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z',
   leaf: 'M17 8C8 10 5.9 16.17 3.82 21.34l1.89.66.95-2.3c.48.17.98.3 1.34.3C19 20 22 3 22 3c-1 2-8 2.25-13 3.25S2 11.5 2 13.5s1.75 3.75 1.75 3.75C7 8 17 8 17 8z',
@@ -298,7 +299,7 @@ const SCENES: ReadonlyArray<Scene> = HOUSE.scenes;
 
 /* ================================================================ shell */
 
-type Page = 'home' | 'rooms' | 'people' | 'profile' | 'cinema' | 'security' | 'grow' | 'sky' | 'printers' | 'settings';
+type Page = 'home' | 'rooms' | 'people' | 'profile' | 'cinema' | 'security' | 'grow' | 'sky' | 'printers' | 'guitar' | 'settings';
 
 /**
  * `optional` pages are OFF for everybody until a user turns them on in Setup.
@@ -331,6 +332,7 @@ const NAV: ReadonlyArray<NavItem> = [
   { id: 'sky', label: 'Sky', icon: P.sky },
   { id: 'profile', label: 'Profile', icon: P.person },
   { id: 'printers', label: 'Printers', icon: P.printer, optional: true },
+  { id: 'guitar', label: 'Guitar', icon: P.music, optional: true },
   { id: 'settings', label: 'Setup', icon: P.cog, adminOnly: true },
 ];
 
@@ -358,6 +360,7 @@ const LOCKED_VISIBLE = new Set<string>(['home', 'profile']);
 
 const PAGE_HINT: Record<string, string> = {
   printers: 'Bambu H2D and X1C -- chamber cameras and job status.',
+  guitar: 'A 52-song syllabus, two a week, with tab links.',
 };
 
 /** Default: everything on except the optional pages, in the order NAV declares. */
@@ -484,6 +487,9 @@ export function EstateApp({ hass }: { hass: Hass }) {
           {page === 'sky' && <SkyPage hass={hass} narrow={narrow} />}
           {page === 'printers' && (!navPrefs.hidden.includes('printers')
             ? <PrintersPage hass={hass} narrow={narrow} />
+            : <HomePage hass={hass} narrow={narrow} go={setPage} />)}
+          {page === 'guitar' && (!navPrefs.hidden.includes('guitar')
+            ? <GuitarPage hass={hass} narrow={narrow} />
             : <HomePage hass={hass} narrow={narrow} go={setPage} />)}
           {page === 'settings' && <SettingsPage hass={hass} narrow={narrow}
             prefs={navPrefs} savePrefs={saveNav} />}
@@ -2518,6 +2524,12 @@ interface ListPanelProps {
   /** Strip decoration from the displayed title (the movie list drops the year). */
   display?: (summary: string) => string;
   subtitle?: (summary: string) => string | undefined;
+  /**
+   * Extra content per row, rendered OUTSIDE the tick button. It has to sit
+   * outside: a link inside a button is invalid HTML and the browser swallows
+   * one of the two clicks.
+   */
+  rowExtra?: (item: TodoItem) => ReactNode;
 }
 
 /**
@@ -2531,6 +2543,7 @@ interface ListPanelProps {
 function ListPanel({
   hass, entityId, label, span, doneVerb = 'done', filters, match, pick,
   pickEyebrow = 'Tonight', addPlaceholder, annotate, sort, display, subtitle,
+  rowExtra,
 }: ListPanelProps) {
   const { items, loaded, setStatus, addItem } = useTodoList(hass, entityId);
   const [filter, setFilter] = useState<string>(filters?.[0]?.id ?? 'all');
@@ -2648,17 +2661,23 @@ function ListPanel({
           const note = annotate && !ticked ? annotate(item) : null;
           const sub = subtitle ? subtitle(item.summary) : undefined;
           return (
-            <button
+            <div
               key={item.uid}
+              style={{
+                display: 'flex', alignItems: 'flex-start', gap: 10,
+                borderBottom: `1px solid ${T.line}`,
+              }}
+            >
+            <button
               type="button"
               className="est-lift"
               onClick={() => setStatus(item, !ticked)}
               aria-pressed={ticked}
               aria-label={`${item.summary}${ticked ? `, ${doneVerb}` : ''}`}
               style={{
-                display: 'flex', alignItems: 'flex-start', gap: 12, width: '100%',
+                display: 'flex', alignItems: 'flex-start', gap: 12, flex: 1, minWidth: 0,
                 textAlign: 'left', padding: '9px 6px', background: 'none', border: 'none',
-                borderBottom: `1px solid ${T.line}`, color: 'inherit', cursor: 'pointer', font: 'inherit',
+                color: 'inherit', cursor: 'pointer', font: 'inherit',
               }}
             >
               <span
@@ -2695,6 +2714,12 @@ function ListPanel({
                 )}
               </span>
             </button>
+            {rowExtra && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingRight: 4 }}>
+                {rowExtra(item)}
+              </div>
+            )}
+            </div>
           );
         })}
       </div>
@@ -2834,6 +2859,111 @@ function SkyList({ hass, span }: { hass: Hass; span: number }) {
       pick
       pickEyebrow="Go look at this"
     />
+  );
+}
+
+/**
+ * "Artist — Title (1994)" -> "Artist Title", for building a search URL.
+ */
+function songQuery(summary: string): string {
+  return summary.replace(/\s*\(\d{4}\)\s*$/, '').replace(/\s*—\s*/g, ' ').trim();
+}
+
+/**
+ * A small external link. Ultimate Guitar has no stable per-song URL we could
+ * hard-code without looking every one up by hand and watching them rot, so
+ * these are SEARCHES - they always resolve, and land on the tab list for that
+ * song rather than a guess at a tab id.
+ */
+function TabLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(ev) => ev.stopPropagation()}
+      style={{
+        fontSize: 11, letterSpacing: '.04em', textTransform: 'uppercase',
+        color: T.dim, textDecoration: 'none', whiteSpace: 'nowrap',
+        border: `1px solid ${T.line}`, borderRadius: 999, padding: '3px 9px',
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
+/**
+ * The guitar syllabus, on its own opt-in page.
+ *
+ * ORDER is the content: the songs ramp from one-finger riffs to things that
+ * take a fortnight, so "this week" is simply the first rows still unticked.
+ * That is why there is no random pick - drawing week 47 in week 3 would be
+ * actively unhelpful - and why the open rows at the top get badged instead.
+ */
+const SONGS_PER_WEEK = 2;
+
+function GuitarPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
+  const entityId = E.guitarList ?? '';
+  const { items } = useTodoList(hass, entityId);
+  const cols = narrow ? 1 : 3;
+
+  const open = items.filter((i) => i.status !== 'completed');
+  const learned = items.length - open.length;
+  const thisWeek = new Set(open.slice(0, SONGS_PER_WEEK).map((i) => i.uid));
+  const week = Math.floor(learned / SONGS_PER_WEEK) + 1;
+
+  return (
+    <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+      <Glass span={cols} style={{ padding: '26px 24px' }}>
+        <PanelHead label={`Week ${week} · two songs`} />
+        {open.slice(0, SONGS_PER_WEEK).map((it) => (
+          <div key={it.uid} style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 21, fontWeight: 300 }}>{it.summary}</div>
+            {it.description && (
+              <div style={{ fontSize: 13, color: T.dim, marginTop: 4, maxWidth: '68ch' }}>
+                {it.description}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+              <TabLink href={`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(songQuery(it.summary))}`}>
+                Ultimate Guitar
+              </TabLink>
+              <TabLink href={`https://www.songsterr.com/?pattern=${encodeURIComponent(songQuery(it.summary))}`}>
+                Songsterr
+              </TabLink>
+              <TabLink href={`https://www.youtube.com/results?search_query=${encodeURIComponent(songQuery(it.summary) + ' guitar lesson')}`}>
+                Lesson
+              </TabLink>
+            </div>
+          </div>
+        ))}
+        {open.length === 0 && (
+          <div style={{ fontSize: 15, color: T.ok, marginTop: 12 }}>
+            All {items.length} learned. Time for a new list.
+          </div>
+        )}
+        <div style={{ fontSize: 11.5, color: T.faint, marginTop: 18 }}>
+          Tick a song off and the next one moves up. The order is the syllabus —
+          it ramps on purpose, so skip ahead if a week is too easy.
+        </div>
+      </Glass>
+
+      <ListPanel
+        hass={hass}
+        entityId={entityId}
+        label="The whole list"
+        span={cols}
+        doneVerb="learned"
+        addPlaceholder="Add a song you want to learn…"
+        annotate={(item) => (thisWeek.has(item.uid) ? { label: 'This week', tone: 'go' } : null)}
+        rowExtra={(item) => (
+          <TabLink href={`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(songQuery(item.summary))}`}>
+            Tab
+          </TabLink>
+        )}
+      />
+    </div>
   );
 }
 

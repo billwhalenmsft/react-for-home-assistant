@@ -162,6 +162,7 @@ export interface EntityMap {
   printQueue?: string;
   recipeList?: string;
   adventureList?: string;
+  guitarList?: string;
 
   /** Conditions the Night Sky list needs to judge "is it worth going out". */
   cloudPct?: string;
