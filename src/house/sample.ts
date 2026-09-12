@@ -93,6 +93,7 @@ export const SAMPLE_HOUSE: HouseConfig = {
       ['Mudroom', 'light.mudroom_lights'],
     ],
     // Adaptive Lighting creates one switch per profile you define.
+    hueGroup: 'light.hue_main_floor',
     autopilotHue: 'switch.adaptive_lighting_kitchen',
     autopilotDim: 'switch.adaptive_lighting_dimmers',
     frame: 'media_player.living_room_tv',

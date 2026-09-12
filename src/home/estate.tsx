@@ -1593,6 +1593,7 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
       <WeatherPanel hass={hass} />
 
       <LightingSummary hass={hass} onMore={() => go('rooms')} />
+        <HueTune hass={hass} />
       <NowPlaying hass={hass} onMore={() => go('cinema')} />
       <GrowSummary hass={hass} onMore={() => go('grow')} />
     </div>
@@ -1671,6 +1672,190 @@ function LightingSummary({ hass, onMore }: { hass: Hass; onMore?: () => void }) 
           onChange={(v) => void hass.callService('light', 'turn_on', { brightness_pct: Math.round(v) }, { entity_id: E.allLights })}
         />
       )}
+    </Glass>
+  );
+}
+
+
+/* =================================================================== hue */
+
+/*
+ * Hue, on the hour.
+ *
+ * Adaptive Lighting already knows what colour the day should be, and publishes
+ * its running verdict on the switch as attributes. So this card READS that
+ * number rather than recomputing it - there is no second opinion about the
+ * colour of the afternoon, which is exactly how it should be.
+ *
+ * Three states matter and the card names all three:
+ *
+ *   dark     - the group is off
+ *   in sync  - lit, and Adaptive Lighting is still steering it
+ *   manual   - lit, but somebody picked a colour, so AL has stepped back
+ *
+ * That third one is the reason this card exists. Adaptive Lighting stops
+ * adapting a light the moment you set it by hand, and it does so silently.
+ * Without a word for that state you are left wondering why the kitchen quietly
+ * stopped following the sun three days ago. Here it says so, and the way back
+ * is one button.
+ */
+
+/* Swatch colours are literal rather than computed. Kelvin-to-RGB is an
+   approximation whichever way you do it, and a wrong-looking swatch is worse
+   than a hand-picked one that matches what the bulb actually does. */
+/* `num` reads an entity's STATE. These are all attributes, so they need their
+   own narrow reader rather than a cast at every call site. */
+const attrNum = (e: HassEntity | undefined, key: string, fallback: number): number => {
+  const v = Number(attr(e, key));
+  return Number.isFinite(v) ? v : fallback;
+};
+
+const KELVIN_PRESETS: ReadonlyArray<{ k: number; label: string; css: string }> = [
+  { k: 2200, label: 'Candle',   css: '#ffb56b' },
+  { k: 2700, label: 'Warm',     css: '#ffc998' },
+  { k: 4000, label: 'Neutral',  css: '#ffe4cd' },
+  { k: 5500, label: 'Daylight', css: '#fff4ec' },
+  { k: 6500, label: 'Cool',     css: '#eaf1ff' },
+];
+
+const HUE_COLORS: ReadonlyArray<{ label: string; hs: [number, number] }> = [
+  { label: 'Blossom', hs: [335, 44] },
+  { label: 'Amber',   hs: [30, 66] },
+  { label: 'Meadow',  hs: [118, 40] },
+  { label: 'Lagoon',  hs: [190, 54] },
+  { label: 'Dusk',    hs: [268, 46] },
+];
+
+function HueTune({ hass }: { hass: Hass }) {
+  const group = E.hueGroup;
+  const ids = useMemo(() => (group ? [group, E.autopilotHue] : [E.autopilotHue]), [group]);
+  const e = useEntities(hass, ids);
+
+  if (!group) return null;
+
+  const light = e[group];
+  const auto = e[E.autopilotHue];
+  const on = light?.state === 'on';
+
+  /* AL lists the lights it has handed back to the user. Membership of that
+     list IS the manual flag - there is no separate attribute for it. */
+  const manualList = (attr(auto, 'manual_control') as string[] | undefined) ?? [];
+  const manual = manualList.includes(group);
+
+  const dayK = attrNum(auto, 'color_temp_kelvin', 0);
+  const dayRgb = (attr(auto, 'rgb_color') as number[] | undefined) ?? [255, 224, 190];
+  const dayCss = `rgb(${dayRgb[0]}, ${dayRgb[1]}, ${dayRgb[2]})`;
+  const dayPct = Math.round(attrNum(auto, 'brightness_pct', 0));
+  const litK = attrNum(light, 'color_temp_kelvin', 0);
+
+  const minK = attrNum(light, 'min_color_temp_kelvin', 2000);
+  const maxK = attrNum(light, 'max_color_temp_kelvin', 6535);
+
+  /* Hand the group back to Adaptive Lighting, then ask it to act at once.
+     Clearing manual control alone would leave the light where it is until
+     AL's next interval, which reads as "the button did nothing". */
+  const resync = () => {
+    void hass.callService('adaptive_lighting', 'set_manual_control',
+      { entity_id: E.autopilotHue, lights: [group], manual_control: false });
+    void hass.callService('adaptive_lighting', 'apply',
+      { entity_id: E.autopilotHue, lights: [group], turn_on_lights: true, transition: 2 });
+  };
+
+  const status = !on ? 'Dark' : manual ? 'Manual' : 'In sync';
+  const statusTone = !on ? T.faint : manual ? T.gold : T.ok;
+
+  return (
+    <Glass>
+      <PanelHead
+        label="Hue"
+        right={<span style={{ fontSize: 11.5, color: statusTone, letterSpacing: '.04em' }}>{status}</span>}
+      />
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
+        <button
+          type="button" className="est-lift est-tap"
+          aria-label={on ? 'Turn the Hue lights off' : 'Turn the Hue lights on, in sync with the hour'}
+          onClick={() => { if (on) { void hass.callService('light', 'turn_off', {}, { entity_id: group }); } else { resync(); } }}
+          style={{
+            width: 58, height: 58, borderRadius: 20, display: 'grid', placeItems: 'center', cursor: 'pointer',
+            border: `1px solid ${on ? T.goldDeep : T.line}`,
+            background: on ? dayCss : 'rgba(255,255,255,0.05)',
+            color: on ? '#1a1408' : T.dim,
+            boxShadow: on ? `0 6px 26px ${dayCss}55` : 'none',
+          }}
+        >
+          <Icon d={P.bulb} size={26} />
+        </button>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 17, fontWeight: 400 }}>
+            {dayK ? `${dayK}K right now` : 'Adaptive Lighting idle'}
+          </div>
+          <div style={{ fontSize: 12, color: T.dim, marginTop: 2 }}>
+            {!on
+              ? `Tap to open up the Hue lights at ${dayK}K \u00b7 ${dayPct}%`
+              : manual
+                ? `Held at ${litK ? litK + 'K' : 'a picked colour'} \u2014 the sun is not steering these`
+                : `Following the sun \u00b7 ${dayPct}% brightness`}
+          </div>
+        </div>
+      </div>
+
+      {manual && on && (
+        <button
+          type="button" className="est-lift est-tap" onClick={resync}
+          style={{
+            width: '100%', padding: '10px 12px', marginBottom: 14, cursor: 'pointer',
+            borderRadius: 10, border: `1px solid ${T.goldDeep}`, background: 'rgba(211,176,110,0.12)',
+            color: T.gold, font: 'inherit', fontSize: 13,
+          }}
+        >
+          Back to the hour
+        </button>
+      )}
+
+      <span style={{ ...LABEL, display: 'block', marginBottom: 8 }}>Warmth</span>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+        {KELVIN_PRESETS.map((k) => (
+          <button
+            key={k.k} type="button" className="est-lift est-tap" title={`${k.label} \u00b7 ${k.k}K`}
+            aria-label={`${k.label}, ${k.k} kelvin`}
+            onClick={() => void hass.callService('light', 'turn_on',
+              { kelvin: k.k }, { entity_id: group })}
+            style={{
+              flex: 1, minWidth: 54, height: 38, borderRadius: 9, cursor: 'pointer',
+              border: `1px solid ${on && litK === k.k ? T.gold : T.line}`,
+              background: k.css, color: '#2a2118', font: 'inherit', fontSize: 10.5,
+              letterSpacing: '.03em',
+            }}
+          >
+            {k.label}
+          </button>
+        ))}
+      </div>
+
+      <span style={{ ...LABEL, display: 'block', marginBottom: 8 }}>Colour</span>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {HUE_COLORS.map((c) => (
+          <button
+            key={c.label} type="button" className="est-lift est-tap" title={c.label} aria-label={c.label}
+            onClick={() => void hass.callService('light', 'turn_on',
+              { hs_color: c.hs, brightness_pct: Math.max(dayPct, 40) }, { entity_id: group })}
+            style={{
+              flex: 1, minWidth: 54, height: 38, borderRadius: 9, cursor: 'pointer',
+              border: `1px solid ${T.line}`, font: 'inherit', fontSize: 10.5, letterSpacing: '.03em',
+              background: `hsl(${c.hs[0]}, ${c.hs[1]}%, 58%)`, color: '#1b1712',
+            }}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ fontSize: 11, color: T.faint, marginTop: 12, lineHeight: 1.55 }}>
+        Picking any of these hands the lights to you and Adaptive Lighting steps back,
+        until you send them back to the hour. Range {minK}–{maxK}K.
+      </div>
     </Glass>
   );
 }

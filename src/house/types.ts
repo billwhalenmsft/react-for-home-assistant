@@ -148,6 +148,12 @@ export interface EntityMap {
   allLights: string;
   rooms: ReadonlyArray<{ name: string; light: string; temp?: string }>;
   fixtures: ReadonlyArray<Named>;
+  /**
+   * The Hue group itself, the one Adaptive Lighting steers. Separate from
+   * `allLights`, which is the mixed HA group containing Lutron fixtures too
+   * and therefore cannot take a colour.
+   */
+  hueGroup?: string;
   autopilotHue: string;
   autopilotDim: string;
   frame: string;
