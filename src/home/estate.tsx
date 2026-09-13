@@ -1593,9 +1593,24 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
       <WeatherPanel hass={hass} />
 
       <LightingSummary hass={hass} onMore={() => go('rooms')} />
-        <HueTune hass={hass} />
+      <HueTune hass={hass} />
       <NowPlaying hass={hass} onMore={() => go('cinema')} />
       <GrowSummary hass={hass} onMore={() => go('grow')} />
+
+      <AlertBlock
+        label="Overnight power"
+        note="One look a night at what the house is still pulling once it should be quiet. Silent on the nights the number is where it belongs, which is the point."
+      >
+        <SettingBooleanToggle hass={hass} entity="input_boolean.phantom_draw_enabled"
+          label="Check enabled"
+          hint="A nightly check rather than a live alarm - power crosses any threshold a dozen times a day for good reasons." />
+        <SettingSlider hass={hass} entity="input_number.phantom_draw_watts"
+          label="Flag above"
+          hint="Measured draw only. Anything on a circuit without a smart plug is invisible to this, so treat it as a floor." />
+        <SettingTime hass={hass} entity="input_datetime.phantom_draw_time"
+          label="Check at"
+          hint="Late enough that the house should genuinely be idle." />
+      </AlertBlock>
     </div>
   );
 }
@@ -1676,6 +1691,29 @@ function LightingSummary({ hass, onMore }: { hass: Hass; onMore?: () => void }) 
   );
 }
 
+
+
+/*
+ * An alert's own switches, shown on the page that shows the thing it watches.
+ *
+ * Setup holds the house-wide dials, and that is still right for thresholds
+ * that affect everybody. This is the other half of the idea: if you are
+ * standing on the Printers page wanting the printer alerts changed, you
+ * should not have to go and find Setup to do it.
+ */
+function AlertBlock({ label, note, span, children }: {
+  label: string; note?: string; span?: number; children: ReactNode;
+}) {
+  return (
+    <Glass span={span}>
+      <PanelHead label={label} />
+      {note && (
+        <div style={{ fontSize: 11.5, color: T.faint, lineHeight: 1.6, paddingBottom: 6 }}>{note}</div>
+      )}
+      {children}
+    </Glass>
+  );
+}
 
 /* =================================================================== hue */
 
@@ -4142,6 +4180,21 @@ function WateringTab({ hass, narrow, span }: { hass: Hass; narrow: boolean; span
           these are the manual overrides.
         </div>
       </Glass>
+
+      <AlertBlock
+        label="Freeze watch"
+        note="Hose bibs, anything still in pots, and the rain barrel. Checked in the evening, while there is still time to do something about it."
+      >
+        <SettingBooleanToggle hass={hass} entity="input_boolean.freeze_alert_enabled"
+          label="Watch enabled"
+          hint="Covers both the evening forecast check and the backstop that fires if the yard actually drops." />
+        <SettingSlider hass={hass} entity="input_number.freeze_alert_temp"
+          label="Warn below"
+          hint="Set above freezing on purpose. Forecasts are approximate and cold air pools in low spots." />
+        <SettingTime hass={hass} entity="input_datetime.freeze_check_time"
+          label="Evening check"
+          hint="When tonight's forecast low gets read." />
+      </AlertBlock>
       {dialog}
     </>
   );
@@ -4779,6 +4832,25 @@ function PrintersPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
           </Glass>
         );
       })}
+
+      <AlertBlock
+        span={cols}
+        label="Printer alerts"
+        note="Which of these reach your phone. Both machines are watched by the same switches."
+      >
+        <SettingBooleanToggle hass={hass} entity="input_boolean.printer_alert_done"
+          label="Print finished"
+          hint="Fires on the machine reporting finish, not on progress reaching 100 - the bed is still hot at 100." />
+        <SettingBooleanToggle hass={hass} entity="input_boolean.printer_alert_failed"
+          label="Print failed"
+          hint="Either the status goes to failed or the print-error sensor trips mid-job. Both, because they do not always happen together." />
+        <SettingBooleanToggle hass={hass} entity="input_boolean.printer_alert_filament"
+          label="Filament run out"
+          hint="Only while a print is actually running. The sensor reads empty whenever a machine sits idle with no spool." />
+        <SettingBooleanToggle hass={hass} entity="input_boolean.printer_alert_hms"
+          label="Printer reports a fault"
+          hint="Bambu's own health warning, after five quiet minutes. It covers everything from a jam to an open lid, so it is the calm one." />
+      </AlertBlock>
 
       {E.printQueue && <PrintQueue hass={hass} span={cols} />}
     </div>
