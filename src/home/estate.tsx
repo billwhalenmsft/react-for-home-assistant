@@ -4074,66 +4074,122 @@ function TravelSky({ hass, narrow }: { hass: Hass; narrow: boolean }) {
  * not inches, and inches depend on each head's precipitation rate. Relative is
  * honest here and absolute would not be.
  */
-const ZONE_RUNTIME: ReadonlyArray<readonly [string, string]> = [
-  ['Front Yard', 'sensor.zone_1_front_yard_runtime_7d'],
-  ['Side · by Fischers', 'sensor.zone_2_side_by_fischers_runtime_7d'],
-  ['Back · left', 'sensor.zone_3_back_left_runtime_7d'],
-  ['Back · right rear', 'sensor.zone_4_back_right_rear_runtime_7d'],
-  ['Back · right front', 'sensor.zone_5_back_right_front_runtime_7d'],
-  ['Side · A/C unit', 'sensor.zone_6_side_a_c_unit_runtime_7d'],
-  ['Side · by driveway', 'sensor.zone_7_side_by_driveway_runtime_7d'],
+/*
+ * Head type is what turns minutes into inches, and the two types differ by
+ * roughly four to one. Fixed sprays throw a lot of water over a small area;
+ * rotors sweep slowly and apply far less per minute. A schedule that gives
+ * both the same runtime is not watering them the same amount - it is watering
+ * the rotor zones about a quarter as much.
+ *
+ * Rates are nominal catalogue figures, not a catch-cup test of this yard, so
+ * the inches column is an ESTIMATE and the card says so. The ratio between the
+ * two types is far more reliable than either absolute number, which is why the
+ * verdict below leans on the comparison rather than the figure.
+ */
+type HeadKind = 'spray' | 'rotor';
+const HEAD_RATE: Record<HeadKind, number> = { spray: 1.5, rotor: 0.4 };  // inches per hour
+
+/* Cool-season turf, September, Minnesota. Midsummer would be higher. */
+const TARGET_IN_WEEK = 1.0;
+
+const ZONE_RUNTIME: ReadonlyArray<readonly [string, string, HeadKind]> = [
+  ['Front Yard', 'sensor.zone_1_front_yard_runtime_7d', 'rotor'],
+  ['Side · by Fischers', 'sensor.zone_2_side_by_fischers_runtime_7d', 'spray'],
+  ['Back · left', 'sensor.zone_3_back_left_runtime_7d', 'rotor'],
+  ['Back · right rear', 'sensor.zone_4_back_right_rear_runtime_7d', 'rotor'],
+  ['Back · right front', 'sensor.zone_5_back_right_front_runtime_7d', 'rotor'],
+  ['Side · A/C unit', 'sensor.zone_6_side_a_c_unit_runtime_7d', 'spray'],
+  ['Side · by driveway', 'sensor.zone_7_side_by_driveway_runtime_7d', 'spray'],
 ];
 
 function ZoneRuntime({ hass }: { hass: Hass }) {
   const ids = useMemo(() => ZONE_RUNTIME.map(([, id]) => id), []);
   const e = useEntities(hass, ids);
   const rain = useEntity(hass, 'sensor.ecowitt_weekly_rain_6b');
+  const rainIn = Number(rain?.state);
 
-  const mins = ZONE_RUNTIME.map(([label, id]) => {
-    const h = Number(e[id]?.state);
-    return { label, min: Number.isFinite(h) ? h * 60 : null };
+  const rows = ZONE_RUNTIME.map(([label, id, head]) => {
+    const hours = Number(e[id]?.state);
+    const ok = Number.isFinite(hours);
+    return {
+      label, head,
+      min: ok ? hours * 60 : null,
+      inches: ok ? hours * HEAD_RATE[head] : null,
+    };
   });
-  const known = mins.filter((m) => m.min !== null) as { label: string; min: number }[];
-  const peak = known.length ? Math.max(...known.map((m) => m.min)) : 0;
-  const low = known.length ? Math.min(...known.map((m) => m.min)) : 0;
-  const spread = peak > 0 ? Math.round(((peak - low) / peak) * 100) : 0;
+
+  const known = rows.filter((r) => r.inches !== null) as
+    { label: string; head: HeadKind; min: number; inches: number }[];
+
+  /* The comparison that matters: how the two head types are being served,
+     not how any single zone is doing. */
+  const byHead = (k: HeadKind) => known.filter((r) => r.head === k);
+  const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+  const rotorIn = avg(byHead('rotor').map((r) => r.inches));
+  const sprayIn = avg(byHead('spray').map((r) => r.inches));
+  const shortKind: HeadKind | null =
+    !known.length ? null : rotorIn < sprayIn * 0.7 ? 'rotor' : sprayIn < rotorIn * 0.7 ? 'spray' : null;
+
+  const scale = Math.max(TARGET_IN_WEEK, ...known.map((r) => r.inches), 0.01);
 
   return (
     <Glass>
-      <PanelHead label="Zone runtime · 7 days" />
+      <PanelHead
+        label="Zone water · 7 days"
+        right={<span style={{ fontSize: 11.5, color: T.faint }}>target ~{TARGET_IN_WEEK.toFixed(1)}″</span>}
+      />
+
       <div style={{ display: 'grid', gap: 7 }}>
-        {mins.map((m) => (
-          <div key={m.label} style={{ display: 'grid', gridTemplateColumns: '116px 1fr 46px', gap: 10, alignItems: 'center' }}>
-            <span style={{ fontSize: 11.5, color: T.dim, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.label}</span>
-            <div style={{ height: 8, borderRadius: 4, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
-              <div style={{
-                width: `${m.min !== null && peak > 0 ? Math.max(3, (m.min / peak) * 100) : 0}%`,
-                height: '100%', borderRadius: 4,
-                background: m.min !== null && m.min === low && spread >= 15
-                  ? T.gold
-                  : `linear-gradient(90deg, ${T.goldDeep}, ${T.gold})`,
-              }} />
+        {rows.map((r) => {
+          const short = r.inches !== null && r.inches < TARGET_IN_WEEK * 0.6;
+          return (
+            <div key={r.label} style={{ display: 'grid', gridTemplateColumns: '112px 40px 1fr 76px', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 11.5, color: T.dim, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {r.label}
+              </span>
+              <span style={{
+                fontSize: 9.5, letterSpacing: '.05em', textTransform: 'uppercase',
+                color: T.faint, border: `1px solid ${T.line}`, borderRadius: 999,
+                padding: '1px 0', textAlign: 'center',
+              }}>
+                {r.head === 'spray' ? 'spray' : 'rotor'}
+              </span>
+              <div style={{ position: 'relative', height: 8, borderRadius: 4, background: 'rgba(255,255,255,0.06)' }}>
+                <div style={{
+                  width: `${r.inches !== null ? Math.min(100, Math.max(3, (r.inches / scale) * 100)) : 0}%`,
+                  height: '100%', borderRadius: 4,
+                  background: short ? '#e2725b' : `linear-gradient(90deg, ${T.goldDeep}, ${T.gold})`,
+                }} />
+                {/* where a healthy week would reach */}
+                <div style={{
+                  position: 'absolute', top: -2, bottom: -2,
+                  left: `${(TARGET_IN_WEEK / scale) * 100}%`,
+                  width: 1, background: T.line,
+                }} />
+              </div>
+              <span style={{ fontSize: 11.5, color: short ? '#e2725b' : T.text, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                {r.inches === null ? '—' : `${r.inches.toFixed(2)}″ · ${Math.round(r.min!)}m`}
+              </span>
             </div>
-            <span style={{ fontSize: 11.5, color: T.text, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-              {m.min === null ? '—' : `${Math.round(m.min)}m`}
-            </span>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      <div style={{ fontSize: 11.5, color: T.faint, marginTop: 12, lineHeight: 1.6 }}>
+      <div style={{ fontSize: 12, color: T.dim, marginTop: 13, lineHeight: 1.6 }}>
         {known.length === 0
           ? 'No runtime recorded yet — these fill in as zones run.'
-          : spread < 15
-            ? `Zones are within ${spread}% of each other, so a dry patch here is not a schedule gap. That points at head coverage, pressure, or the soil itself.`
-            : `Widest gap is ${spread}% — the short zone is worth checking against the others in Rachio before digging anywhere.`}
-        {' '}Rain this week: {rain?.state ?? '—'}″.
+          : shortKind === 'rotor'
+            ? `Your rotor zones average ${rotorIn.toFixed(2)}″ a week against ${sprayIn.toFixed(2)}″ on the sprays. Same minutes, roughly a quarter of the water — rotors apply far less per minute, so equal runtimes are not equal watering. The dry ground is the front and back lawns, and this is why.`
+            : shortKind === 'spray'
+              ? `The spray zones are running short of the rotors this week.`
+              : `Both head types are landing near ${TARGET_IN_WEEK.toFixed(1)}″.`}
+        {Number.isFinite(rainIn) ? ` Rain added ${rainIn.toFixed(2)}″.` : ''}
       </div>
 
       <div style={{ fontSize: 11, color: T.faint, marginTop: 10, lineHeight: 1.55, borderTop: `1px solid ${T.line}`, paddingTop: 10 }}>
-        Minutes, not inches. Converting needs each head's precipitation rate, which
-        Rachio does not publish here. And there is no soil probe in the yard — the
-        only one in the house is in the grow tent.
+        Inches are estimated from nominal head rates, {HEAD_RATE.spray}″/hr spray and {HEAD_RATE.rotor}″/hr rotor,
+        not measured in this yard. A catch-cup test would replace the guess. The ratio between the
+        two types is far more dependable than either number.
       </div>
     </Glass>
   );
