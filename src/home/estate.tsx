@@ -3319,6 +3319,29 @@ function PrintQueue({ hass, span }: { hass: Hass; span: number }) {
       span={span}
       doneVerb="printed"
       addPlaceholder="Add something to print…"
+      /*
+       * There is no "reprint this" button, and there cannot be one yet.
+       *
+       * The Bambu integration exposes no job identity - no gcode file name, no
+       * task name, no model id - so a bambustudio:// deep link would have
+       * nothing to open. Rather than ship a button that launches an empty
+       * application, these are SEARCHES, the same call the guitar page makes:
+       * they always resolve, and a MakerWorld model page carries its own Open
+       * in Bambu Studio button, which is the real reprint path.
+       *
+       * If Developer / LAN Only mode is ever switched on, the integration
+       * starts publishing the job name and this can become a direct link.
+       */
+      rowExtra={(it) => (
+        <>
+          <TabLink href={`https://makerworld.com/en/search/models?keyword=${encodeURIComponent(it.summary)}`}>
+            MakerWorld
+          </TabLink>
+          <TabLink href={`https://www.printables.com/search/models?q=${encodeURIComponent(it.summary)}`}>
+            Printables
+          </TabLink>
+        </>
+      )}
     />
   );
 }
