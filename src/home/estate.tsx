@@ -4060,6 +4060,85 @@ function TravelSky({ hass, narrow }: { hass: Hass; narrow: boolean }) {
  * that matters is "did it rain, and is it about to", which is two cards away
  * on the Weather tab. Rachio is the controller; the heads are Rain Bird.
  */
+
+/*
+ * Seven days of real valve time per zone.
+ *
+ * This exists to answer one question - is a dry patch dry because its zone is
+ * being SHORT-CHANGED, or because the water is going on and not staying? Those
+ * need completely different fixes, and you cannot tell them apart by looking
+ * at the lawn.
+ *
+ * The bar is drawn against the longest-running zone rather than against a
+ * target, because there is no target to draw against: Rachio knows minutes,
+ * not inches, and inches depend on each head's precipitation rate. Relative is
+ * honest here and absolute would not be.
+ */
+const ZONE_RUNTIME: ReadonlyArray<readonly [string, string]> = [
+  ['Front Yard', 'sensor.zone_1_front_yard_runtime_7d'],
+  ['Side · by Fischers', 'sensor.zone_2_side_by_fischers_runtime_7d'],
+  ['Back · left', 'sensor.zone_3_back_left_runtime_7d'],
+  ['Back · right rear', 'sensor.zone_4_back_right_rear_runtime_7d'],
+  ['Back · right front', 'sensor.zone_5_back_right_front_runtime_7d'],
+  ['Side · A/C unit', 'sensor.zone_6_side_a_c_unit_runtime_7d'],
+  ['Side · by driveway', 'sensor.zone_7_side_by_driveway_runtime_7d'],
+];
+
+function ZoneRuntime({ hass }: { hass: Hass }) {
+  const ids = useMemo(() => ZONE_RUNTIME.map(([, id]) => id), []);
+  const e = useEntities(hass, ids);
+  const rain = useEntity(hass, 'sensor.ecowitt_weekly_rain_6b');
+
+  const mins = ZONE_RUNTIME.map(([label, id]) => {
+    const h = Number(e[id]?.state);
+    return { label, min: Number.isFinite(h) ? h * 60 : null };
+  });
+  const known = mins.filter((m) => m.min !== null) as { label: string; min: number }[];
+  const peak = known.length ? Math.max(...known.map((m) => m.min)) : 0;
+  const low = known.length ? Math.min(...known.map((m) => m.min)) : 0;
+  const spread = peak > 0 ? Math.round(((peak - low) / peak) * 100) : 0;
+
+  return (
+    <Glass>
+      <PanelHead label="Zone runtime · 7 days" />
+      <div style={{ display: 'grid', gap: 7 }}>
+        {mins.map((m) => (
+          <div key={m.label} style={{ display: 'grid', gridTemplateColumns: '116px 1fr 46px', gap: 10, alignItems: 'center' }}>
+            <span style={{ fontSize: 11.5, color: T.dim, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.label}</span>
+            <div style={{ height: 8, borderRadius: 4, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+              <div style={{
+                width: `${m.min !== null && peak > 0 ? Math.max(3, (m.min / peak) * 100) : 0}%`,
+                height: '100%', borderRadius: 4,
+                background: m.min !== null && m.min === low && spread >= 15
+                  ? T.gold
+                  : `linear-gradient(90deg, ${T.goldDeep}, ${T.gold})`,
+              }} />
+            </div>
+            <span style={{ fontSize: 11.5, color: T.text, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+              {m.min === null ? '—' : `${Math.round(m.min)}m`}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ fontSize: 11.5, color: T.faint, marginTop: 12, lineHeight: 1.6 }}>
+        {known.length === 0
+          ? 'No runtime recorded yet — these fill in as zones run.'
+          : spread < 15
+            ? `Zones are within ${spread}% of each other, so a dry patch here is not a schedule gap. That points at head coverage, pressure, or the soil itself.`
+            : `Widest gap is ${spread}% — the short zone is worth checking against the others in Rachio before digging anywhere.`}
+        {' '}Rain this week: {rain?.state ?? '—'}″.
+      </div>
+
+      <div style={{ fontSize: 11, color: T.faint, marginTop: 10, lineHeight: 1.55, borderTop: `1px solid ${T.line}`, paddingTop: 10 }}>
+        Minutes, not inches. Converting needs each head's precipitation rate, which
+        Rachio does not publish here. And there is no soil probe in the yard — the
+        only one in the house is in the grow tent.
+      </div>
+    </Glass>
+  );
+}
+
 function WateringTab({ hass, narrow, span }: { hass: Hass; narrow: boolean; span: number }) {
   const zones = E.rachioZones ?? [];
   const ids = useMemo(
@@ -4203,6 +4282,8 @@ function WateringTab({ hass, narrow, span }: { hass: Hass; narrow: boolean; span
           these are the manual overrides.
         </div>
       </Glass>
+
+      <ZoneRuntime hass={hass} />
 
       <AlertBlock
         label="Freeze watch"
