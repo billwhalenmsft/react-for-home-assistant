@@ -801,6 +801,10 @@ function useAttention(hass: Hass): Attention[] {
     E.lock, E.garage1, E.garage2, E.soil, E.water, E.washer, E.dryer, E.waste,
     E.laundryWasherFlag, E.laundryDryerFlag,
     ...E.doors.map(([, id]) => id), ...E.growOnline,
+    // From packages/watchdog.yaml. A device that has gone quiet is exactly
+    // what this board is for, and it already carries the garage and grow
+    // offline cases - this just widens the net to the rest of the house.
+    'sensor.watchdog_offline', 'sensor.watchdog_low_batteries',
   ], []);
   const e = useEntities(hass, ids);
 
@@ -830,6 +834,20 @@ function useAttention(hass: Hass): Attention[] {
   if (water >= 0 && water < 25) add(`Humidifier reservoir ${Math.round(water)}%`, 'warn', undefined, 'grow');
   const offline = E.growOnline.filter((id) => e[id] && e[id].state !== 'on').length;
   if (offline > 0) add(`${offline} grow device${offline > 1 ? 's' : ''} offline`, 'alert', undefined, 'grow');
+
+  // --- the house going quiet ---------------------------------------------
+  // Alert, not warn. Six days of a dead Zigbee coordinator and nine of dark
+  // door sensors is what this exists to prevent happening again.
+  const gone = Number(e['sensor.watchdog_offline']?.state);
+  if (Number.isFinite(gone) && gone > 0) {
+    const names = attr(e['sensor.watchdog_offline'], 'names') as string | undefined;
+    add(names ? `Gone quiet: ${names}` : `${gone} device${gone > 1 ? 's' : ''} have gone quiet`, 'alert');
+  }
+  // Batteries are an errand, not an emergency, so they sit below everything.
+  const lowBatt = Number(e['sensor.watchdog_low_batteries']?.state);
+  if (Number.isFinite(lowBatt) && lowBatt > 0) {
+    add(`${lowBatt} batter${lowBatt > 1 ? 'ies' : 'y'} low`, 'warn');
+  }
 
   // --- laundry: standing chores, cleared by a person ----------------------
   // These persist after the machine goes idle, which is the whole point: the
@@ -1415,6 +1433,45 @@ function SkyBanner({ hass, compact }: { hass: Hass; compact?: boolean }) {
 
 /* ================================================================= home */
 
+
+/*
+ * A latching toggle for the action rail.
+ *
+ * Visually a Pill like the scenes beside it, but it means something different:
+ * a scene fires and is done, a mode stays on until you turn it off. The lit
+ * state carries that, and the subtitle says what being on currently means -
+ * "quiet hours" that are not actually silencing anything because the house is
+ * awake is worth knowing before you rely on it.
+ */
+function ModePill({ hass, entity, label, icon, whenOn, whenOff }: {
+  hass: Hass; entity: string; label: string; icon?: string;
+  whenOn?: string; whenOff?: string;
+}) {
+  const ent = useEntity(hass, entity);
+  const on = ent?.state === 'on';
+  const missing = ent === undefined;
+  const hint = on ? whenOn : whenOff;
+
+  return (
+    <Pill
+      active={on}
+      ariaLabel={`${label}, ${on ? 'on' : 'off'}${hint ? `. ${hint}` : ''}`}
+      onClick={() => {
+        if (missing) return;
+        void hass.callService('input_boolean', on ? 'turn_off' : 'turn_on', {}, { entity_id: entity });
+      }}
+    >
+      {icon && <Icon d={icon} size={15} />}
+      <span style={{ display: 'grid', lineHeight: 1.15, textAlign: 'left' }}>
+        <span>{label}</span>
+        {hint && (
+          <span style={{ fontSize: 9.5, opacity: 0.7, letterSpacing: '.02em' }}>{hint}</span>
+        )}
+      </span>
+    </Pill>
+  );
+}
+
 /* ================================================================ scenes */
 
 /*
@@ -1529,6 +1586,7 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
   // exist as a fact. What DOES exist is which one this surface last ran, and
   // that is the honest thing to show - a scene that stays lit after you tap it.
   const [lastScene, setLastScene] = useState<string | null>(null);
+  const asleep = useEntity(hass, 'binary_sensor.house_asleep')?.state === 'on';
   const openUpSays = useSceneSummary(hass, 'openup');
   const lockupSays = useSceneSummary(hass, 'lockup');
 
@@ -1547,6 +1605,18 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
               onFired={() => setLastScene(s.script)}
             />
           ))}
+          {/* Modes, not scenes. These latch on until switched off, which is
+              why they sit after the scene buttons rather than among them. */}
+          <ModePill
+            hass={hass} entity="input_boolean.quiet_hours_enabled" label="Quiet" icon={P.shield}
+            whenOn={asleep ? 'holding alerts' : 'armed, house awake'}
+            whenOff="alerts always ring"
+          />
+          <ModePill
+            hass={hass} entity="input_boolean.vacation_mode" label="Away" icon={P.home}
+            whenOn="lights on a wander" whenOff={undefined}
+          />
+
           <span style={{ flex: 1 }} />
           {/* Open Up and Lockup are a pair: the first thing pressed in the
               morning and the last thing at night. Open Up carries the bulb
@@ -5200,6 +5270,24 @@ function SettingsPage({ hass, narrow, prefs, savePrefs }: {
       <SceneSetup hass={hass} sceneKey="lockup" />
       <SceneSetup hass={hass} sceneKey="goodnight" />
       <SceneSetup hass={hass} sceneKey="morning" />
+
+      <Glass>
+        <PanelHead label="📡 Watchdog" />
+        <div style={{ fontSize: 11.5, color: T.faint, lineHeight: 1.6, paddingBottom: 6 }}>
+          The house telling you when it has gone quiet. Deliberately a short watchlist
+          rather than every unavailable entity, because an alert that cries about all
+          230 of them gets muted in a day.
+        </div>
+        <SettingBooleanToggle hass={hass} entity="input_boolean.watchdog_enabled"
+          label="Offline alerts"
+          hint="Fires after six hours of silence from anything on the critical list, and again when it comes back." />
+        <SettingBooleanToggle hass={hass} entity="input_boolean.watchdog_battery_digest"
+          label="Weekly battery digest"
+          hint="Sunday at 9:30, naming anything low. Silent on the weeks nothing is." />
+        <SettingSlider hass={hass} entity="input_number.watchdog_battery_pct"
+          label="Flag batteries below"
+          hint="Low enough to be worth an errand, high enough to beat the device going dark." />
+      </Glass>
 
       <Glass>
         <PanelHead label="🌗 Lighting autopilot" />
