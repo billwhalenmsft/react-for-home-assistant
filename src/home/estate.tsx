@@ -2826,6 +2826,113 @@ function ProfilePage({ hass, narrow, admin, navPrefs, savePrefs }: {
   );
 }
 
+
+/* ================================================================= meals */
+
+/*
+ * This week's dinners, mirrored out of Skylight.
+ *
+ * Skylight owns the plan - the frame in the kitchen is where the family reads
+ * it and the Skylight API is where it is written. These helpers are a mirror,
+ * set when the week is planned, so the panel can show the same week without
+ * inventing a second source of truth.
+ *
+ * The mirror does NOT update itself, and the card says so out loud rather than
+ * presenting a fortnight-old plan as tonight's dinner. A stale plan shown
+ * confidently is worse than no plan shown at all.
+ *
+ * Ids come from packages/meal_plan.yaml, which ships with this card.
+ */
+const MEAL_DAYS: ReadonlyArray<readonly [string, string]> = [
+  ['Mon', 'input_text.meal_mon'],
+  ['Tue', 'input_text.meal_tue'],
+  ['Wed', 'input_text.meal_wed'],
+  ['Thu', 'input_text.meal_thu'],
+  ['Fri', 'input_text.meal_fri'],
+  ['Sat', 'input_text.meal_sat'],
+  ['Sun', 'input_text.meal_sun'],
+];
+
+function MealWeek({ hass, span }: { hass: Hass; span?: number }) {
+  const ids = useMemo(
+    () => [...MEAL_DAYS.map(([, id]) => id), 'input_text.meal_plan_updated'],
+    [],
+  );
+  const e = useEntities(hass, ids);
+  const now = useNow(600000);
+
+  /* JS Sunday is 0; the table starts on Monday. */
+  const todayIdx = (now.getDay() + 6) % 7;
+
+  const synced = e['input_text.meal_plan_updated']?.state;
+  const staleDays = (() => {
+    if (!synced || synced.length < 10) return null;
+    const then = new Date(synced + 'T00:00:00');
+    if (Number.isNaN(then.getTime())) return null;
+    return Math.floor((now.getTime() - then.getTime()) / 86400000);
+  })();
+
+  const anyPlanned = MEAL_DAYS.some(([, id]) => {
+    const v = e[id]?.state;
+    return v && !['unknown', 'unavailable', ''].includes(v);
+  });
+
+  return (
+    <Glass span={span}>
+      <PanelHead label="This week's dinners" />
+
+      {!anyPlanned ? (
+        <div style={{ fontSize: 13, color: T.dim, padding: '6px 0' }}>
+          Nothing planned. The week is set in Skylight.
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 2 }}>
+          {MEAL_DAYS.map(([label, id], i) => {
+            const v = e[id]?.state;
+            const meal = v && !['unknown', 'unavailable', ''].includes(v) ? v : null;
+            const today = i === todayIdx;
+            return (
+              <div
+                key={id}
+                style={{
+                  display: 'grid', gridTemplateColumns: '38px 1fr', gap: 10,
+                  alignItems: 'baseline', padding: '7px 8px', borderRadius: 8,
+                  background: today ? 'rgba(211,176,110,0.10)' : 'transparent',
+                }}
+              >
+                <span style={{
+                  fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase',
+                  color: today ? T.gold : T.faint,
+                }}>
+                  {label}
+                </span>
+                <span style={{
+                  fontSize: today ? 15 : 13.5,
+                  color: meal ? (today ? T.text : T.dim) : T.faint,
+                  fontWeight: today ? 500 : 400,
+                }}>
+                  {meal ?? 'Not set'}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div style={{ fontSize: 11, color: T.faint, marginTop: 10, lineHeight: 1.5 }}>
+        {staleDays === null
+          ? 'Mirrored from Skylight.'
+          : staleDays <= 0
+            ? 'Synced from Skylight today.'
+            : staleDays === 1
+              ? 'Synced from Skylight yesterday.'
+              : `Synced from Skylight ${staleDays} days ago${staleDays > 7 ? ' \u2014 probably out of date' : ''}.`}
+        {' '}Skylight is the source; change it there.
+      </div>
+    </Glass>
+  );
+}
+
 function PeoplePage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const cols = narrow ? 1 : 2;
   return (
@@ -2834,6 +2941,8 @@ function PeoplePage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
         <PanelHead label="The family" />
         <PeopleGrid hass={hass} narrow={narrow} />
       </Glass>
+
+      <MealWeek hass={hass} />
 
       <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
         {E.adventureList && <AdventureList hass={hass} span={1} />}
