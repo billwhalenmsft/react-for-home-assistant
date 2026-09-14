@@ -2897,6 +2897,116 @@ function ProfilePage({ hass, narrow, admin, navPrefs, savePrefs }: {
 }
 
 
+
+/*
+ * The Skylight chore chart, for awareness rather than operation.
+ *
+ * Skylight is write-only from Home Assistant: the integration pushes chores
+ * and reads nothing back, so the frame in the kitchen knows everything and
+ * this panel knew nothing. This answers the one question worth asking from a
+ * phone, which is who is behind.
+ *
+ * COUNTS, NOT LISTS. There are around 200 pending chores in a week across
+ * five people. A card showing them all is a wall nobody reads, and the ticking
+ * off belongs on the frame where it already works. "Silas, 11 today" is
+ * actionable. Eleven checkboxes are furniture.
+ *
+ * Late is the number that carries colour, because today's chores are simply
+ * today and late ones are the household drifting.
+ */
+const CHORE_PEOPLE: ReadonlyArray<readonly [string, string]> = [
+  ['Rowan', 'input_text.chores_rowan'],
+  ['Alex', 'input_text.chores_alex'],
+  ['Silas', 'input_text.chores_silas'],
+  ['Erin', 'input_text.chores_erin'],
+  ['Bill', 'input_text.chores_bill'],
+];
+
+function parseChores(v: string | undefined): { today: number; late: number } | null {
+  if (!v || ['unknown', 'unavailable', ''].includes(v)) return null;
+  const today = /(\d+)\s*today/.exec(v);
+  const late = /(\d+)\s*late/.exec(v);
+  return { today: today ? Number(today[1]) : 0, late: late ? Number(late[1]) : 0 };
+}
+
+function FamilyBoard({ hass, span }: { hass: Hass; span?: number }) {
+  const ids = useMemo(
+    () => [...CHORE_PEOPLE.map(([, id]) => id), 'input_text.chores_synced'],
+    [],
+  );
+  const e = useEntities(hass, ids);
+  const now = useNow(600000);
+
+  const rows = CHORE_PEOPLE.map(([name, id]) => ({ name, ...(parseChores(e[id]?.state) ?? { today: -1, late: 0 }) }));
+  const known = rows.filter((r) => r.today >= 0);
+  const lateTotal = known.reduce((a, r) => a + r.late, 0);
+  const peak = Math.max(1, ...known.map((r) => r.today + r.late));
+
+  const synced = e['input_text.chores_synced']?.state;
+  const staleDays = (() => {
+    if (!synced || synced.length < 10) return null;
+    const then = new Date(synced + 'T00:00:00');
+    if (Number.isNaN(then.getTime())) return null;
+    return Math.floor((now.getTime() - then.getTime()) / 86400000);
+  })();
+
+  return (
+    <Glass span={span}>
+      <PanelHead
+        label="Chore chart"
+        right={
+          <span style={{ fontSize: 11.5, color: lateTotal > 0 ? '#e2725b' : T.ok }}>
+            {lateTotal > 0 ? `${lateTotal} late` : 'nothing late'}
+          </span>
+        }
+      />
+
+      {known.length === 0 ? (
+        <div style={{ fontSize: 13, color: T.dim, padding: '6px 0' }}>
+          Not synced yet. The chart lives on the Skylight frame.
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {rows.map((r) => (
+            <div key={r.name} style={{ display: 'grid', gridTemplateColumns: '62px 1fr 84px', gap: 10, alignItems: 'center' }}>
+              <span style={{ fontSize: 12.5, color: T.dim }}>{r.name}</span>
+              <div style={{ display: 'flex', height: 8, borderRadius: 4, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                <div style={{
+                  width: `${r.today > 0 ? (r.today / peak) * 100 : 0}%`,
+                  background: `linear-gradient(90deg, ${T.goldDeep}, ${T.gold})`,
+                }} />
+                <div style={{
+                  width: `${r.late > 0 ? (r.late / peak) * 100 : 0}%`,
+                  background: '#e2725b',
+                }} />
+              </div>
+              <span style={{ fontSize: 11.5, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: T.dim }}>
+                {r.today < 0 ? '\u2014' : (
+                  <>
+                    {r.today} today
+                    {r.late > 0 && <span style={{ color: '#e2725b' }}>{` +${r.late}`}</span>}
+                  </>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ fontSize: 11, color: T.faint, marginTop: 12, lineHeight: 1.5 }}>
+        {staleDays === null
+          ? 'Mirrored from Skylight.'
+          : staleDays <= 0
+            ? 'Synced from Skylight today.'
+            : staleDays === 1
+              ? 'Synced from Skylight yesterday.'
+              : `Synced ${staleDays} days ago${staleDays > 3 ? ', so treat it as rough' : ''}.`}
+        {' '}Tick chores off on the frame; this is a read-out, not a to-do list.
+      </div>
+    </Glass>
+  );
+}
+
 /* ================================================================= meals */
 
 /*
@@ -3013,6 +3123,8 @@ function PeoplePage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
       </Glass>
 
       <MealWeek hass={hass} />
+
+      <FamilyBoard hass={hass} />
 
       <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
         {E.adventureList && <AdventureList hass={hass} span={1} />}
