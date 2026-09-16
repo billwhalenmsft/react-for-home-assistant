@@ -97,6 +97,11 @@ const P = {
   more: 'M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
   cog: 'M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z',
   printer: 'M19 8h-1V3H6v5H5a3 3 0 00-3 3v6h4v4h12v-4h4v-6a3 3 0 00-3-3M8 5h8v3H8V5m8 15H8v-5h8v5m3-7a1 1 0 11-1-1 1 1 0 011 1Z',
+  // Thermostat modes. Material's whatshot / ac_unit / swap_vert, and MDI's fan.
+  flame: 'M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-.36 3.6-1.21 4.62-2.58.39 1.29.59 2.65.59 4.04 0 2.65-2.15 4.8-4.8 4.8z',
+  snowflake: 'M22 11h-4.17l3.24-3.24-1.41-1.42L15 11h-2V9l4.66-4.66-1.42-1.41L13 6.17V2h-2v4.17L7.76 2.93 6.34 4.34 11 9v2H9L4.34 6.34 2.93 7.76 6.17 11H2v2h4.17l-3.24 3.24 1.41 1.42L9 13h2v2l-4.66 4.66 1.42 1.41L11 17.83V22h2v-4.17l3.24 3.24 1.42-1.41L13 15v-2h2l4.66 4.66 1.41-1.42L17.83 13H22v-2z',
+  swapVert: 'M16 17.01V10h-2v7.01h-3L15 21l4-3.99h-3zM9 3L5 6.99h3V14h2V6.99h3L9 3z',
+  fan: 'M12 11a1 1 0 0 0-1 1 1 1 0 0 0 1 1 1 1 0 0 0 1-1 1 1 0 0 0-1-1m.5-9C17 2 17.11 5.57 14.75 6.75c-.99.49-1.43 1.54-1.62 2.47.48.2.9.51 1.22.91 3.7-2 7.68-1.21 7.68 2.37 0 4.5-3.57 4.6-4.75 2.25-.5-.99-1.56-1.43-2.49-1.62-.2.48-.51.9-.91 1.22 2 3.7 1.21 7.68-2.38 7.68C7 22.03 6.91 18.46 9.26 17.28c.99-.5 1.43-1.56 1.62-2.49-.48-.2-.9-.51-1.22-.91-3.7 2-7.68 1.21-7.68-2.38C1.98 7 5.55 6.91 6.73 9.26c.49.99 1.55 1.43 2.48 1.62.2-.48.51-.9.91-1.22-2-3.7-1.21-7.68 2.38-7.68V2z',
 };
 
 function Icon({ d, size = 20, color = 'currentColor' }: { d: string; size?: number; color?: string }) {
@@ -1971,7 +1976,7 @@ function HueTune({ hass }: { hass: Hass }) {
 /**
  * The Nest face, drawn the way the device itself draws it: a dark dial that
  * glows from the rim with whatever the system is doing, a tick ring for the
- * scale, one bright marker at the target, and a separate small marker showing
+ * scale, a bright marker at each setpoint, and a separate small marker showing
  * where the room actually is.
  *
  * Hues are literal rather than theme tokens so this matches the Lovelace card
@@ -1982,16 +1987,51 @@ const NEST_HUE = {
   cooling: '#4aa8ff',
   idle: '#7a8698',
   off: '#5b6473',
+  eco: '#5fd08a',
 };
+
+/*
+ * The modes a thermostat can be put into, in the device's own order and with
+ * the device's own names - "Heat • Cool" is what the Nest calls the range
+ * mode, and calling it "Auto" here would make the panel and the wall disagree
+ * about what the house is doing.
+ *
+ * Only the modes an entity actually reports in hvac_modes are rendered, so
+ * this list may safely name modes this particular Nest does not have (and a
+ * future stat that has dry or fan_only gets them without a code change).
+ */
+const HVAC_MODES: ReadonlyArray<{ mode: string; label: string; icon: string; hue: string }> = [
+  { mode: 'off', label: 'Off', icon: P.power, hue: NEST_HUE.off },
+  { mode: 'heat', label: 'Heat', icon: P.flame, hue: NEST_HUE.heating },
+  { mode: 'cool', label: 'Cool', icon: P.snowflake, hue: NEST_HUE.cooling },
+  { mode: 'heat_cool', label: 'Heat • Cool', icon: P.swapVert, hue: '#d3b06e' },
+  { mode: 'dry', label: 'Dry', icon: P.leaf, hue: '#c98cff' },
+  { mode: 'fan_only', label: 'Fan', icon: P.fan, hue: NEST_HUE.idle },
+];
 
 const TICK_COUNT = 60;
 const FACE_START = 135;   // degrees in SVG space (0 = 3 o'clock)
 const FACE_SWEEP = 270;
 
+/*
+ * In heat_cool the Nest will not let the two setpoints meet - it holds a
+ * deadband, so the furnace and the compressor can never fight each other over
+ * the same degree. Pushing one edge into the other pushes the other along
+ * rather than refusing the gesture, which is what the device itself does.
+ */
+const DEADBAND = 3;
+
+const clampT = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
 function NestFace({
-  target, current, lo, hi, hue, active, off, capTop, capBottom, unit,
+  target, band, focus, current, lo, hi, hue, active, off, capTop, capBottom, unit,
 }: {
-  target: number | null; current: number | null;
+  target: number | null;
+  /** heat_cool: the two setpoints. null in every single-setpoint mode. */
+  band: { lo: number; hi: number } | null;
+  /** which edge of the band the buttons and the drag are moving. */
+  focus: 'lo' | 'hi';
+  current: number | null;
   lo: number; hi: number; hue: string;
   active: boolean; off: boolean;
   capTop: string; capBottom: string; unit: string;
@@ -2005,26 +2045,57 @@ function NestFace({
   };
 
   const targetAngle = target != null ? angleFor(target) : null;
-  const showCurrent =
-    current != null && target != null && Math.abs(current - target) >= 1;
+  const bandLo = band ? angleFor(band.lo) : null;
+  const bandHi = band ? angleFor(band.hi) : null;
+  const bandMid = bandLo != null && bandHi != null ? (bandLo + bandHi) / 2 : null;
+
+  // In range mode the room sits inside the band it is being held in, so the
+  // "far enough away to be worth drawing" test is against the nearer edge.
+  const gap = band
+    ? (current != null ? Math.min(Math.abs(current - band.lo), Math.abs(current - band.hi)) : null)
+    : (current != null && target != null ? Math.abs(current - target) : null);
+  const showCurrent = current != null && gap != null && gap >= 1;
 
   const ticks = [];
   for (let i = 0; i < TICK_COUNT; i++) {
     const a = FACE_START + (i / (TICK_COUNT - 1)) * FACE_SWEEP;
-    const lit = targetAngle != null && a <= targetAngle && !off;
+    // A lit tick means "inside what you asked for". In range mode that is the
+    // band between the setpoints, tinted warm on the heat side and cool on the
+    // cool side; in every other mode it is everything up to the single target.
+    let tint: string | null = null;
+    if (!off) {
+      if (bandLo != null && bandHi != null && bandMid != null) {
+        if (a >= bandLo && a <= bandHi) tint = a <= bandMid ? NEST_HUE.heating : NEST_HUE.cooling;
+      } else if (targetAngle != null && a <= targetAngle) {
+        tint = hue;
+      }
+    }
     const major = i % 5 === 0;
     const [x1, y1] = pt(major ? 88 : 92, a);
     const [x2, y2] = pt(102, a);
     ticks.push(
       <line
         key={i} x1={x1} y1={y1} x2={x2} y2={y2}
-        stroke={lit ? hue : 'rgba(255,255,255,0.16)'}
+        stroke={tint ?? 'rgba(255,255,255,0.16)'}
         strokeWidth={major ? 2.6 : 1.8}
         strokeLinecap="round"
-        opacity={lit && !active ? 0.72 : 1}
+        opacity={tint && !active ? 0.72 : 1}
       />
     );
   }
+
+  const marker = (angle: number, colour: string, lit: boolean) => {
+    const [x1, y1] = pt(84, angle);
+    const [x2, y2] = pt(106, angle);
+    return (
+      <line
+        x1={x1} y1={y1} x2={x2} y2={y2} stroke={colour}
+        strokeWidth={lit ? 5 : 3.2} strokeLinecap="round"
+        opacity={lit ? 1 : 0.55}
+        filter={lit && active ? 'url(#nestGlow)' : undefined}
+      />
+    );
+  };
 
   return (
     <svg viewBox={`0 0 ${S} ${S}`} width="100%" style={{ maxWidth: 250, display: 'block' }}>
@@ -2062,23 +2133,43 @@ function NestFace({
         );
       })()}
 
-      {targetAngle != null && !off && (() => {
-        const [x1, y1] = pt(84, targetAngle);
-        const [x2, y2] = pt(106, targetAngle);
-        return (
-          <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={hue} strokeWidth="5"
-                strokeLinecap="round" filter={active ? 'url(#nestGlow)' : undefined} />
-        );
-      })()}
+      {!off && bandLo != null && bandHi != null && (
+        <g>
+          {marker(bandLo, NEST_HUE.heating, focus === 'lo')}
+          {marker(bandHi, NEST_HUE.cooling, focus === 'hi')}
+        </g>
+      )}
+      {!off && band == null && targetAngle != null && marker(targetAngle, hue, true)}
 
       <text x={C} y={C - 28} textAnchor="middle" fill="rgba(255,255,255,0.45)"
             fontSize="10.5" letterSpacing="2.4">{capTop.toUpperCase()}</text>
-      <text x={C} y={C + 16} textAnchor="middle"
-            fill={off ? 'rgba(255,255,255,0.45)' : '#fff'}
-            fontSize="62" fontWeight="200">
-        {target != null ? Math.round(target) : '—'}
-        <tspan fontSize="24" dy="-20">{unit}</tspan>
-      </text>
+
+      {band ? (
+        /* Two numbers, the Nest's own range read-out. The one the controls are
+           pointed at stays bright; the other steps back, so there is never a
+           question about what the next press will move. */
+        <g fontWeight="200">
+          <text x={C - 34} y={C + 14} textAnchor="middle" fill={NEST_HUE.heating}
+                fontSize="42" opacity={focus === 'lo' ? 1 : 0.42}>
+            {Math.round(band.lo)}<tspan fontSize="17" dy="-14">{unit}</tspan>
+          </text>
+          <text x={C} y={C + 8} textAnchor="middle" fill="rgba(255,255,255,0.30)" fontSize="20">
+            {'–'}
+          </text>
+          <text x={C + 34} y={C + 14} textAnchor="middle" fill={NEST_HUE.cooling}
+                fontSize="42" opacity={focus === 'hi' ? 1 : 0.42}>
+            {Math.round(band.hi)}<tspan fontSize="17" dy="-14">{unit}</tspan>
+          </text>
+        </g>
+      ) : (
+        <text x={C} y={C + 16} textAnchor="middle"
+              fill={off ? 'rgba(255,255,255,0.45)' : '#fff'}
+              fontSize="62" fontWeight="200">
+          {target != null ? Math.round(target) : '—'}
+          <tspan fontSize="24" dy="-20">{unit}</tspan>
+        </text>
+      )}
+
       <text x={C} y={C + 46} textAnchor="middle" fill="rgba(255,255,255,0.55)"
             fontSize="12" fontWeight="300">{capBottom}</text>
     </svg>
@@ -2089,19 +2180,24 @@ function NestFace({
  * The house has exactly ONE thermostat.
  *
  * It used to be listed here as two, "Main Floor / NEST" and "Lower Level /
- * ALARM.COM" — but those are two integrations reading the same Nest, not two
+ * ALARM.COM" - but those are two integrations reading the same Nest, not two
  * devices, and they report identical numbers because they are. The tabs
  * invited you to pick a zone the building does not have.
  *
  * The Nest entity is the one kept: supported_features 411 against the
  * alarm.com proxy's 3, so it alone offers humidity, the eco preset, fan modes
- * and hvac_action — and it is the one still standing after the subscription is
+ * and hvac_action - and it is the one still standing after the subscription is
  * cancelled. The tab strip renders only when there is genuinely a choice, so
  * adding a real second zone later brings it back on its own.
  */
 const CLIMATE_ZONES = [
   { label: 'Main Floor', badge: 'NEST', entity: E.climateNest },
 ] as const;
+
+/** What the card is holding, unsent, while your thumb is still down. */
+type Draft =
+  | { kind: 'single'; t: number }
+  | { kind: 'range'; lo: number; hi: number };
 
 function ClimateDial({ hass }: { hass: Hass }) {
   const ids = useMemo(() => CLIMATE_ZONES.map((z) => z.entity), []);
@@ -2110,85 +2206,147 @@ function ClimateDial({ hass }: { hass: Hass }) {
 
   const zone = CLIMATE_ZONES[zi];
   const clim = e[zone.entity];
+  const mode = clim?.state;
   const current = attr(clim, 'current_temperature') as number | undefined;
-  const target = attr(clim, 'temperature') as number | undefined;
   const humidity = attr(clim, 'current_humidity') as number | undefined;
   const preset = attr(clim, 'preset_mode') as string | undefined;
   const presets = (attr(clim, 'preset_modes') as string[] | undefined) ?? [];
-  const action = (attr(clim, 'hvac_action') as string | undefined) ?? clim?.state;
+  const fanMode = attr(clim, 'fan_mode') as string | undefined;
+  const fanModes = (attr(clim, 'fan_modes') as string[] | undefined) ?? [];
+  const modes = (attr(clim, 'hvac_modes') as string[] | undefined) ?? [];
+  const action = (attr(clim, 'hvac_action') as string | undefined) ?? mode;
   const loT = (attr(clim, 'min_temp') as number | undefined) ?? 50;
   const hiT = (attr(clim, 'max_temp') as number | undefined) ?? 90;
-  const off = clim?.state === 'off';
-  const cooling = action === 'cooling' || clim?.state === 'cool';
+  const off = mode === 'off';
+
+  // In heat_cool the Nest reports `temperature: null` and two setpoints
+  // instead. Reading only `temperature` - which is what this card used to do -
+  // showed a bare em dash and left the buttons doing nothing at all, because
+  // there was no base number to add a degree to.
+  const tgtT = attr(clim, 'temperature') as number | undefined;
+  const tgtLo = attr(clim, 'target_temp_low') as number | undefined;
+  const tgtHi = attr(clim, 'target_temp_high') as number | undefined;
+  const isRange = tgtLo != null && tgtHi != null && tgtT == null;
+
+  // Which end of the range the controls point at. Heat first, because in
+  // Minnesota it is the one you reach for eight months of the year.
+  const [focus, setFocus] = useState<'lo' | 'hi'>('lo');
 
   // Google's SDM API rate-limits thermostat commands per user, and it does not
   // take much to trip: four taps a few hundred ms apart earned a 429
-  // RESOURCE_EXHAUSTED. So taps move a local target and only the settled value
+  // RESOURCE_EXHAUSTED. So taps move a local draft and only the settled value
   // is sent, once the user stops pressing. One gesture, one command.
-  const [draft, setDraft] = useState<number | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const sendTimer = useRef<number | undefined>(undefined);
   const holdTimer = useRef<number | undefined>(undefined);
-
-  // Switching zones must not carry one stat's draft over to the other.
-  useEffect(() => { setDraftValue(null); setNotice(null); }, [zi]);
-  useEffect(() => () => {
-    window.clearTimeout(sendTimer.current);
-    window.clearTimeout(holdTimer.current);
-  }, []);
 
   // The authoritative draft lives in a ref, not in state. A fast drag delivers
   // several moves inside a single React tick, and batched state hands every
   // one of them the same stale base - so a twelve-degree drag would only ever
   // move one degree. The ref accumulates synchronously; state only renders it.
-  const draftRef = useRef<number | null>(null);
-  const setDraftValue = (v: number | null) => { draftRef.current = v; setDraft(v); };
+  const draftRef = useRef<Draft | null>(null);
+  const setDraftValue = (v: Draft | null) => { draftRef.current = v; setDraft(v); };
 
-  const shownTarget = draft ?? target;
+  const cancelPending = () => {
+    window.clearTimeout(sendTimer.current);
+    window.clearTimeout(holdTimer.current);
+  };
 
-  const bump = (delta: number) => {
-    const base = draftRef.current ?? target;
-    if (base == null) return;
-    const next = Math.min(hiT, Math.max(loT, base + delta));
-    if (next === draftRef.current) return;
+  // Switching zones must not carry one stat's draft over to the other.
+  useEffect(() => { setDraftValue(null); setNotice(null); }, [zi]);
+  useEffect(() => () => cancelPending(), []);
+
+  // A mode change rewrites which setpoints even exist, so a half-typed number
+  // from the old mode has to go rather than be sent into the new one.
+  useEffect(() => { cancelPending(); setDraftValue(null); }, [mode]);
+
+  const fail = (what: string) => (err: unknown) => {
+    const msg = String((err as { message?: string })?.message ?? err);
+    setNotice(
+      /429|RESOURCE_EXHAUSTED|Too Many Requests/i.test(msg)
+        ? 'Nest is rate-limiting — give it a moment'
+        : what
+    );
+  };
+
+  /* Eco is a hold, not a hint: while it is on, the SDM API refuses setpoint
+     changes outright. Better to say so on the dial than to let a press fail
+     silently and look like the panel is broken. */
+  const eco = preset === 'eco';
+  const locked = off || eco;
+
+  const send = (data: Record<string, number>, next: Draft) => {
     setDraftValue(next);
     setNotice(null);
-    window.clearTimeout(sendTimer.current);
+    cancelPending();
     sendTimer.current = window.setTimeout(() => {
-      hass.callService(
-        'climate', 'set_temperature',
-        { temperature: next }, { entity_id: zone.entity }
-      ).then(
+      hass.callService('climate', 'set_temperature', data, { entity_id: zone.entity }).then(
         () => {
           // Hold the draft briefly so the ring doesn't snap back to the old
           // value while the SDM round-trip lands.
           holdTimer.current = window.setTimeout(() => setDraftValue(null), 4000);
         },
-        (err: unknown) => {
-          const msg = String((err as { message?: string })?.message ?? err);
-          setNotice(
-            /429|RESOURCE_EXHAUSTED|Too Many Requests/i.test(msg)
-              ? 'Nest is rate-limiting — give it a moment'
-              : 'Could not set temperature'
-          );
-          setDraftValue(null);
-        }
+        (err: unknown) => { fail('Could not set temperature')(err); setDraftValue(null); }
       );
     }, 900);
   };
 
+  const bump = (delta: number) => {
+    if (locked) return;
+    const d = draftRef.current;
+
+    if (isRange) {
+      const baseLo = d && d.kind === 'range' ? d.lo : (tgtLo as number);
+      const baseHi = d && d.kind === 'range' ? d.hi : (tgtHi as number);
+      let nLo = baseLo;
+      let nHi = baseHi;
+      if (focus === 'lo') {
+        nLo = clampT(baseLo + delta, loT, hiT - DEADBAND);
+        nHi = clampT(Math.max(baseHi, nLo + DEADBAND), loT, hiT);
+      } else {
+        nHi = clampT(baseHi + delta, loT + DEADBAND, hiT);
+        nLo = clampT(Math.min(baseLo, nHi - DEADBAND), loT, hiT);
+      }
+      if (nLo === baseLo && nHi === baseHi) return;
+      send({ target_temp_low: nLo, target_temp_high: nHi }, { kind: 'range', lo: nLo, hi: nHi });
+      return;
+    }
+
+    const base = d && d.kind === 'single' ? d.t : tgtT;
+    if (base == null) return;
+    const next = clampT(base + delta, loT, hiT);
+    if (next === base) return;
+    send({ temperature: next }, { kind: 'single', t: next });
+  };
+
+  const setHvac = (m: string) => {
+    if (m === mode) return;
+    cancelPending();
+    setDraftValue(null);
+    setNotice(null);
+    hass.callService('climate', 'set_hvac_mode', { hvac_mode: m }, { entity_id: zone.entity })
+      .catch(fail('Could not change mode'));
+  };
+
   const toggleEco = () => {
+    cancelPending();
+    setDraftValue(null);
     hass.callService(
       'climate', 'set_preset_mode',
-      { preset_mode: preset === 'eco' ? 'none' : 'eco' }, { entity_id: zone.entity }
-    ).catch((err: unknown) => {
-      const msg = String((err as { message?: string })?.message ?? err);
-      setNotice(
-        /429|RESOURCE_EXHAUSTED|Too Many Requests/i.test(msg)
-          ? 'Nest is rate-limiting — give it a moment'
-          : 'Could not change preset'
-      );
-    });
+      { preset_mode: eco ? 'none' : 'eco' }, { entity_id: zone.entity }
+    ).catch(fail('Could not change preset'));
+  };
+
+  const toggleFan = () => {
+    // fan_modes is ["on","off"] on this Nest; on anything else, prefer the
+    // opposite named mode rather than inventing a name for it.
+    const nextFan = fanMode === 'on'
+      ? (fanModes.find((f) => f === 'off') ?? fanModes[0])
+      : (fanModes.find((f) => f === 'on') ?? fanModes[0]);
+    if (!nextFan || nextFan === fanMode) return;
+    hass.callService('climate', 'set_fan_mode', { fan_mode: nextFan }, { entity_id: zone.entity })
+      .catch(fail('Could not change the fan'));
   };
 
   const zoneTab = (i: number) => {
@@ -2219,15 +2377,17 @@ function ClimateDial({ hass }: { hass: Hass }) {
   const dragRef = useRef<{ y: number } | null>(null);
   const PX_PER_DEGREE = 10;
 
-  const onDown = (e: ReactPointerEvent) => {
-    if (off || target == null) return;
-    dragRef.current = { y: e.clientY };
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  const hasSetpoint = isRange || tgtT != null;
+
+  const onDown = (ev: ReactPointerEvent) => {
+    if (locked || !hasSetpoint) return;
+    dragRef.current = { y: ev.clientY };
+    (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
   };
-  const onMove = (e: ReactPointerEvent) => {
+  const onMove = (ev: ReactPointerEvent) => {
     const st = dragRef.current;
     if (!st) return;
-    const steps = Math.trunc((st.y - e.clientY) / PX_PER_DEGREE);
+    const steps = Math.trunc((st.y - ev.clientY) / PX_PER_DEGREE);
     if (steps !== 0) {
       bump(steps);
       st.y -= steps * PX_PER_DEGREE; // consume what we applied
@@ -2238,27 +2398,66 @@ function ClimateDial({ hass }: { hass: Hass }) {
   // Literal hue for the dial face so it matches the Lovelace card exactly.
   const hue = off
     ? NEST_HUE.off
-    : /heating/i.test(action ?? '') || clim?.state === 'heat'
-      ? NEST_HUE.heating
-      : cooling
-        ? NEST_HUE.cooling
-        : NEST_HUE.idle;
+    : eco
+      ? NEST_HUE.eco
+      : /heating/i.test(action ?? '') || mode === 'heat'
+        ? NEST_HUE.heating
+        : /cooling/i.test(action ?? '') || mode === 'cool'
+          ? NEST_HUE.cooling
+          : NEST_HUE.idle;
   const sending = draft != null;
 
-  const stepBtn = (delta: number, path: string, label: string) => (
-    <button
-      type="button"
-      onClick={() => bump(delta)}
-      aria-label={label}
-      disabled={off}
-      style={{
-        width: 46, height: 46, borderRadius: 999, cursor: off ? 'default' : 'pointer',
-        display: 'grid', placeItems: 'center',
-        border: `1px solid ${T.line}`, background: 'transparent',
-        color: off ? T.faint : T.text, opacity: off ? 0.5 : 1,
-      }}
-    ><Icon d={path} size={18} /></button>
-  );
+  const shownBand: { lo: number; hi: number } | null = isRange
+    ? (draft && draft.kind === 'range'
+        ? { lo: draft.lo, hi: draft.hi }
+        : { lo: tgtLo as number, hi: tgtHi as number })
+    : null;
+  const shownTarget = draft && draft.kind === 'single' ? draft.t : (tgtT ?? null);
+
+  const stepBtn = (delta: number, path: string, label: string) => {
+    const dead = locked || !hasSetpoint;
+    return (
+      <button
+        type="button"
+        onClick={() => bump(delta)}
+        aria-label={label}
+        disabled={dead}
+        style={{
+          width: 46, height: 46, borderRadius: 999,
+          cursor: dead ? 'default' : 'pointer',
+          display: 'grid', placeItems: 'center',
+          border: `1px solid ${T.line}`, background: 'transparent',
+          color: dead ? T.faint : T.text, opacity: dead ? 0.5 : 1,
+        }}
+      ><Icon d={path} size={18} /></button>
+    );
+  };
+
+  /* The mode row, rendered from the entity's own hvac_modes in our canonical
+     order, so a mode this stat does not have simply never appears. */
+  const modeRow = HVAC_MODES.filter((m) => modes.includes(m.mode));
+
+  const edgeChip = (which: 'lo' | 'hi', label: string, value: number, colour: string) => {
+    const on = focus === which;
+    return (
+      <button
+        type="button"
+        onClick={() => setFocus(which)}
+        aria-pressed={on}
+        disabled={locked}
+        className="est-tap"
+        style={{
+          font: 'inherit', fontSize: 11.5, fontWeight: 500, letterSpacing: '0.04em',
+          padding: '7px 13px', borderRadius: 999,
+          cursor: locked ? 'default' : 'pointer',
+          border: `1px solid ${on ? colour : T.line}`,
+          background: on ? `${colour}1f` : 'transparent',
+          color: on ? colour : T.dim,
+          opacity: locked ? 0.55 : 1,
+        }}
+      >{`${label} ${Math.round(value)}°`}</button>
+    );
+  };
 
   return (
     <Glass style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -2278,19 +2477,27 @@ function ClimateDial({ hass }: { hass: Hass }) {
         onPointerCancel={endDrag}
         style={{
           touchAction: 'none', userSelect: 'none',
-          cursor: off ? 'default' : 'ns-resize',
+          cursor: locked || !hasSetpoint ? 'default' : 'ns-resize',
         }}
       >
         <NestFace
-          target={shownTarget ?? null}
+          target={shownTarget}
+          band={shownBand}
+          focus={focus}
           current={current ?? null}
           lo={loT}
           hi={hiT}
           hue={hue}
           active={!!action && /heating|cooling/i.test(action)}
           off={off}
-          unit="°"
-          capTop={off ? 'Off' : sending ? 'Setting' : 'Target'}
+          unit={'°'}
+          capTop={
+            off ? 'Off'
+              : sending ? 'Setting'
+                : eco ? 'Eco'
+                  : isRange ? 'Heat · Cool'
+                    : 'Target'
+          }
           capBottom={
             current != null
               ? `Now ${Math.round(current)}°${humidity != null ? ` · ${Math.round(humidity)}% RH` : ''}`
@@ -2304,8 +2511,54 @@ function ClimateDial({ hass }: { hass: Hass }) {
         minHeight: 18, marginTop: 10, fontSize: 12.5, fontWeight: 300, textAlign: 'center',
         color: notice ? T.warn : T.dim,
       }}>
-        {notice ?? (off ? 'System off' : titleize(action))}
+        {notice ?? (off
+          ? 'System off'
+          : eco
+            ? 'Eco is holding the setpoints'
+            : titleize(action))}
       </div>
+
+      {/* What the system is allowed to do. Off is included, because turning the
+          whole thing off is a mode like any other and hiding it behind a
+          separate power button only ever makes people hunt for it. */}
+      {modeRow.length > 1 && (
+        <div role="group" aria-label="System mode" style={{
+          display: 'flex', flexWrap: 'wrap', justifyContent: 'center',
+          gap: 7, marginTop: 12,
+        }}>
+          {modeRow.map((m) => {
+            const on = mode === m.mode;
+            return (
+              <button
+                key={m.mode}
+                type="button"
+                onClick={() => setHvac(m.mode)}
+                aria-pressed={on}
+                className="est-tap"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  font: 'inherit', fontSize: 11.5, fontWeight: 500, letterSpacing: '0.04em',
+                  height: 34, padding: '0 13px', borderRadius: 999, cursor: 'pointer',
+                  border: `1px solid ${on ? m.hue : T.line}`,
+                  background: on ? `${m.hue}22` : 'transparent',
+                  color: on ? m.hue : T.dim,
+                }}
+              >
+                <Icon d={m.icon} size={14} />
+                {m.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* In range mode the buttons need to know which end they are moving. */}
+      {shownBand && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
+          {edgeChip('lo', 'Heat to', shownBand.lo, NEST_HUE.heating)}
+          {edgeChip('hi', 'Cool at', shownBand.hi, NEST_HUE.cooling)}
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 14, marginTop: 12, alignItems: 'center' }}>
         {stepBtn(-1, P.minus, `Lower ${zone.label} target temperature`)}
@@ -2314,18 +2567,40 @@ function ClimateDial({ hass }: { hass: Hass }) {
           <button
             type="button"
             onClick={toggleEco}
-            aria-pressed={preset === 'eco'}
+            aria-pressed={eco}
             style={{
               font: 'inherit', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase',
               height: 46, padding: '0 16px', borderRadius: 999, cursor: 'pointer',
-              border: `1px solid ${preset === 'eco' ? T.ok : T.line}`,
-              background: 'transparent', color: preset === 'eco' ? T.ok : T.dim,
+              border: `1px solid ${eco ? T.ok : T.line}`,
+              background: 'transparent', color: eco ? T.ok : T.dim,
             }}
           >Eco</button>
         )}
+        {fanModes.length > 1 && (
+          <button
+            type="button"
+            onClick={toggleFan}
+            aria-pressed={fanMode === 'on'}
+            aria-label={`Circulation fan, currently ${fanMode ?? 'unknown'}`}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 7,
+              font: 'inherit', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase',
+              height: 46, padding: '0 16px', borderRadius: 999, cursor: 'pointer',
+              border: `1px solid ${fanMode === 'on' ? T.info : T.line}`,
+              background: 'transparent', color: fanMode === 'on' ? T.info : T.dim,
+            }}
+          ><Icon d={P.fan} size={15} />Fan</button>
+        )}
       </div>
-      <div style={{ fontSize: 11, color: T.faint, marginTop: 10 }}>
-        Drag the dial up or down
+
+      <div style={{ fontSize: 11, color: T.faint, marginTop: 10, textAlign: 'center' }}>
+        {off
+          ? 'Pick a mode to start the system.'
+          : eco
+            ? 'Turn Eco off to change the temperature.'
+            : isRange
+              ? `Drag the dial to move the highlighted end. The two stay ${DEADBAND}° apart.`
+              : 'Drag the dial up or down'}
       </div>
     </Glass>
   );

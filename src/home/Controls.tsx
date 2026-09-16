@@ -454,7 +454,15 @@ export function EntityControl({
   if (domain === 'climate') {
     const t = attr(s, 'temperature');
     const cur = attr(s, 'current_temperature');
+    const lo = attr(s, 'target_temp_low');
+    const hi = attr(s, 'target_temp_high');
     const target = typeof t === 'number' ? t : null;
+    // heat_cool reports no single `temperature`, just the two ends of the band
+    // it is holding. Showing an em dash there was a lie, and the steppers below
+    // it did nothing at all - there was no base number to add a degree to.
+    const band = target === null && typeof lo === 'number' && typeof hi === 'number'
+      ? `${Math.round(lo)}–${Math.round(hi)}°`
+      : null;
     const step = (delta: number) => {
       if (target === null) return;
       call('climate', 'set_temperature', { temperature: target + delta });
@@ -463,9 +471,15 @@ export function EntityControl({
       <div style={S.card}>
         {head(<span style={S.state}>{typeof cur === 'number' ? `now ${Math.round(cur)}°` : s?.state ?? '—'}</span>)}
         <div style={S.stepper}>
-          <Pill on={false} label="−" ariaLabel={`Lower ${name}`} onClick={() => step(-1)} />
-          <span style={S.big}>{target !== null ? `${Math.round(target)}°` : '—'}</span>
-          <Pill on={false} label="+" ariaLabel={`Raise ${name}`} onClick={() => step(1)} />
+          {target !== null && (
+            <Pill on={false} label="−" ariaLabel={`Lower ${name}`} onClick={() => step(-1)} />
+          )}
+          <span style={S.big}>
+            {target !== null ? `${Math.round(target)}°` : band ?? '—'}
+          </span>
+          {target !== null && (
+            <Pill on={false} label="+" ariaLabel={`Raise ${name}`} onClick={() => step(1)} />
+          )}
         </div>
       </div>
     );
