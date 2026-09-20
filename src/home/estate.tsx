@@ -805,6 +805,8 @@ function useAttention(hass: Hass): Attention[] {
   const ids = useMemo(() => [
     E.lock, E.garage1, E.garage2, E.soil, E.water, E.washer, E.dryer, E.waste,
     E.laundryWasherFlag, E.laundryDryerFlag,
+    // Optional — only present once packages/grow_plan.yaml is installed.
+    ...([E.soilLow, E.rhTarget, E.tentHum, E.nextWatering].filter(Boolean) as string[]),
     ...E.doors.map(([, id]) => id), ...E.growOnline,
     // From packages/watchdog.yaml. A device that has gone quiet is exactly
     // what this board is for, and it already carries the garage and grow
@@ -831,10 +833,28 @@ function useAttention(hass: Hass): Attention[] {
   if (e[E.lock]?.state === 'unlocked') add('Front door is unlocked', 'alert');
 
   // --- grow: the tent has no slack, so these outrank housekeeping ---------
-  const soil = num(e[E.soil]);
+  // Read the DRIEST pot, not one nominated probe. There are two pots and they
+  // dry at different rates - CH1 sits in a saucer and runs wetter - so watching
+  // a single probe is how the other plant gets missed.
+  const soilEnt = e[E.soilLow ?? ''] ?? e[E.soil];
+  const soil = num(soilEnt);
+  const pot = (attr(soilEnt, 'driest_pot') as string | undefined) ?? 'Grow';
   // Soil critical is the one tent condition that is genuinely urgent - ignore
   // it and the plants are gone - so it earns a place on the house board too.
-  if (soil >= 0 && soil < 20) add(`Grow soil critical - ${Math.round(soil)}%`, 'alert', undefined, 'both');
+  // The recipe rides along because the answer should arrive with the problem.
+  if (soil >= 0 && soil < 20) {
+    const next = e[E.nextWatering ?? '']?.state;
+    const what = next === 'Feed' ? ' - feed' : next ? ' - plain water' : '';
+    add(`${pot} soil critical - ${Math.round(soil)}%${what}`, 'alert', undefined, 'both');
+  }
+  // Humidity is the lever most likely to cost buds later: dense flower sitting
+  // well above target is how botrytis starts. Only while actually flowering -
+  // in veg a high RH is fine and this would just be noise.
+  const rhTarget = num(e[E.rhTarget ?? '']);
+  const rhNow = num(e[E.tentHum]);
+  if (rhTarget > 0 && rhNow > 0 && rhNow - rhTarget > 8) {
+    add(`Tent humidity ${Math.round(rhNow)}% vs ${Math.round(rhTarget)}% target`, 'warn', undefined, 'grow');
+  }
   const water = num(e[E.water]);
   if (water >= 0 && water < 25) add(`Humidifier reservoir ${Math.round(water)}%`, 'warn', undefined, 'grow');
   const offline = E.growOnline.filter((id) => e[id] && e[id].state !== 'on').length;
@@ -4290,14 +4310,95 @@ function daysSince(e: HassEntity | undefined): number | undefined {
   return Math.floor((Date.now() / 1000 - ts) / 86400);
 }
 
+/**
+ * The flowering schedule, rendered from packages/grow_plan.yaml.
+ *
+ * HA owns the plan and all of its arithmetic - which week it is, what goes in
+ * the can, what humidity to aim for. This renders that and offers the two
+ * buttons that keep it honest.
+ *
+ * WHY THE BUTTONS MATTER. Nutrients go in every OTHER watering, and nothing
+ * can infer which one you just did: a feed and a plain watering look identical
+ * to a moisture probe. So the alternation is tracked by stamping a timestamp
+ * when you do the thing. Skip the buttons and `next watering` stops being
+ * trustworthy - it is the one piece of this the house cannot work out alone.
+ *
+ * Renders nothing at all if the package is not installed.
+ */
+function FlowerPlan({ hass, narrow, span }: { hass: Hass; narrow: boolean; span?: number }) {
+  const ids = useMemo(() => (
+    [E.flowerWeek, E.feedRecipe, E.rhTarget, E.nextWatering, E.harvestWindow, E.tentHum]
+      .filter(Boolean) as string[]
+  ), []);
+  const e = useEntities(hass, ids);
+  if (!E.flowerWeek || !e[E.flowerWeek]) return null;
+
+  const week = e[E.flowerWeek]?.state ?? '—';
+  const nextEnt = e[E.nextWatering ?? ''];
+  const next = nextEnt?.state ?? '';
+  const detail = (attr(nextEnt, 'detail') as string | undefined) ?? '';
+  const order = attr(e[E.feedRecipe ?? ''], 'order') as string | undefined;
+  const rhTarget = num(e[E.rhTarget ?? '']);
+  const rhNow = num(e[E.tentHum]);
+  const feeding = next === 'Feed';
+  // Above target is the direction that actually costs you buds, so only that
+  // side goes amber. Drier than target in flower is rarely the problem.
+  const rhOff = rhTarget > 0 && rhNow > 0 && rhNow - rhTarget > 8;
+
+  return (
+    <Glass span={span}>
+      <PanelHead
+        label="Flowering plan"
+        right={<span style={{ fontSize: 11.5, color: T.dim }}>Week {week} of 6</span>}
+      />
+      <div style={{ fontSize: 10, color: feeding ? T.gold : T.dim, letterSpacing: '0.16em' }}>
+        NEXT WATERING
+      </div>
+      <div style={{ fontSize: narrow ? 20 : 23, fontWeight: 250, marginTop: 6, color: feeding ? T.gold : T.text }}>
+        {next || '—'}
+      </div>
+      <div style={{ fontSize: 12.5, color: T.dim, marginTop: 8, lineHeight: 1.5 }}>{detail}</div>
+      {feeding && order && (
+        <div style={{ fontSize: 11.5, color: T.warn, marginTop: 8 }}>{order}</div>
+      )}
+
+      <div style={{ display: 'flex', gap: narrow ? 22 : 40, flexWrap: 'wrap', marginTop: 18 }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 250, color: rhOff ? T.warn : T.text }}>
+            {rhNow > 0 ? Math.round(rhNow) : '—'}<span style={{ fontSize: 13, color: T.dim }}> / {rhTarget > 0 ? Math.round(rhTarget) : '—'}%</span>
+          </div>
+          <div style={{ ...LABEL, fontSize: 9.5, marginTop: 3 }}>Humidity / target</div>
+        </div>
+      </div>
+      <div style={{ fontSize: 11.5, color: T.dim, marginTop: 14 }}>
+        {e[E.harvestWindow ?? '']?.state ?? ''}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
+        <Pill tone={feeding ? 'gold' : 'ghost'} onClick={() => { void hass.callService('script', 'smcc_log_feed'); }}>
+          I fed them
+        </Pill>
+        <Pill tone="ghost" onClick={() => { void hass.callService('script', 'smcc_log_water'); }}>
+          Plain water only
+        </Pill>
+      </div>
+    </Glass>
+  );
+}
+
 function GrowPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const ids = useMemo(() => [
     E.soil, E.soilBatt, E.tentTemp, E.tentHum, E.tentVpd, E.water, E.stage,
     E.plantA.name, E.plantA.planted, E.plantA.stage,
     E.plantB.name, E.plantB.planted, E.plantB.stage, ...E.growOnline,
+    ...([E.soilB, E.soilBBatt].filter(Boolean) as string[]),
   ], []);
   const e = useEntities(hass, ids);
-  const soil = num(e[E.soil]);
+  // CH1 = Blueberry, CH2 = Banana Kush. The ring tracks whichever is DRIEST,
+  // because that is the pot that decides when you go downstairs.
+  const soilA = num(e[E.soil]);
+  const soilB = E.soilB ? num(e[E.soilB]) : -1;
+  const soil = soilB >= 0 && soilB < soilA ? soilB : soilA;
   const water = num(e[E.water]);
   const cols = narrow ? 1 : 3;
   const soilColor = soil < 20 ? T.alert : soil < 30 ? T.warn : T.ok;
@@ -4314,16 +4415,32 @@ function GrowPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
       <AttentionBoard items={tentAttention} span={cols} label="Tent needs attention" />
+      <FlowerPlan hass={hass} narrow={narrow} span={narrow ? 1 : cols} />
       <Glass style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <PanelHead label="Soil — the one number" />
+        <PanelHead label="Soil — the driest pot" />
         <Ring pct={soil} color={soilColor}>
           <div>
             <div style={{ fontSize: 46, fontWeight: 200 }}>{Number.isFinite(soil) ? Math.round(soil) : '—'}<span style={{ fontSize: 20 }}>%</span></div>
             <div style={{ fontSize: 10, color: T.dim, letterSpacing: '0.16em', marginTop: 2 }}>MOISTURE</div>
           </div>
         </Ring>
-        <div style={{ fontSize: 11.5, color: T.dim, marginTop: 12 }}>
-          Probe battery {e[E.soilBatt]?.state ?? '—'}%
+        {/* Both pots, always - the ring can only show one and which one it is
+            changes. Seeing the pair is how you notice them diverging, which is
+            what happened when one started sitting in a saucer. */}
+        <div style={{ display: 'flex', gap: 26, marginTop: 14 }}>
+          {([['🫐 Blueberry', soilA, E.soilBatt], ['🍌 Banana Kush', soilB, E.soilBBatt]] as const)
+            .filter(([, v]) => v >= 0)
+            .map(([label, v, batt]) => (
+              <div key={label} style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 17, fontWeight: 250, color: v < 20 ? T.alert : v < 30 ? T.warn : T.text }}>
+                  {Math.round(v)}%
+                </div>
+                <div style={{ fontSize: 10, color: T.dim, marginTop: 2 }}>{label}</div>
+                <div style={{ fontSize: 9.5, color: T.dim, marginTop: 1 }}>
+                  batt {batt ? (e[batt]?.state ?? '—') : '—'}%
+                </div>
+              </div>
+            ))}
         </div>
       </Glass>
 

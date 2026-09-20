@@ -197,11 +197,31 @@ export interface EntityMap {
 
   soil: string;
   soilBatt: string;
+  /**
+   * Second pot. One probe covered both pots until 2026-09-13, which left the
+   * other plant with no moisture guardian at all. Optional: a single-pot tent
+   * is still a valid config.
+   */
+  soilB?: string;
+  soilBBatt?: string;
   tentTemp: string;
   tentHum: string;
   tentVpd: string;
   water: string;
   stage: string;
+
+  /**
+   * The flowering plan, from packages/grow_plan.yaml. HA owns the schedule and
+   * the arithmetic; these pages only render it. All optional, so a house
+   * without that package simply does not show the card.
+   */
+  flowerWeek?: string;
+  feedRecipe?: string;
+  rhTarget?: string;
+  nextWatering?: string;
+  /** Driest of the pots — what the watering reminder actually watches. */
+  soilLow?: string;
+  harvestWindow?: string;
   growOnline: string[];
   plantA: { name: string; planted: string; stage: string };
   plantB: { name: string; planted: string; stage: string };
