@@ -1864,6 +1864,54 @@ function HueTune({ hass }: { hass: Hass }) {
   const ids = useMemo(() => (group ? [group, E.autopilotHue] : [E.autopilotHue]), [group]);
   const e = useEntities(hass, ids);
 
+  /* Brightness, and the small amount of machinery a live slider needs. These
+     hooks sit above the `!group` bail-out because hooks cannot run
+     conditionally, so they read the entity out of the map rather than waiting
+     for `light` to be named further down.
+
+     `brightness` is null while the group is off, which is not the same number
+     as zero - hence the explicit typeof rather than a numeric coercion, which
+     would quietly turn "unknown" into "0%". */
+  const briAttr = attr(group ? e[group] : undefined, 'brightness');
+  const litPct = typeof briAttr === 'number' ? Math.round((briAttr / 255) * 100) : 0;
+
+  /* The thumb follows the finger from a local draft, because waiting for the
+     bridge to echo each step back would make the slider stutter and fight the
+     drag. HA's own number takes back over as soon as it agrees. */
+  const [briDraft, setBriDraft] = useState<number | null>(null);
+  const briTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(briTimer.current), []);
+
+  useEffect(() => {
+    if (briDraft == null) return undefined;
+    if (Math.abs(litPct - briDraft) <= 2) { setBriDraft(null); return undefined; }
+    // A bulb that never reports back must not strand the slider on a number
+    // the room is not actually at.
+    const t = window.setTimeout(() => setBriDraft(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [litPct, briDraft]);
+
+  const shownBri = briDraft ?? litPct;
+
+  const setBrightness = (v: number) => {
+    if (!group) return;
+    setBriDraft(v);
+    window.clearTimeout(briTimer.current);
+    // The Hue bridge starts dropping commands somewhere around ten a second
+    // per group, and a drag across this slider emits many times that. Send the
+    // value the finger settled on, not every one it crossed.
+    briTimer.current = window.setTimeout(() => {
+      void hass.callService(
+        'light', 'turn_on',
+        // A floor of 1% so dragging to the bottom dims rather than switching
+        // the group off and yanking the slider out from under the thumb. Off
+        // is the button above, which is where it belongs.
+        { brightness_pct: Math.max(1, Math.round(v)) },
+        { entity_id: group },
+      );
+    }, 110);
+  };
+
   if (!group) return null;
 
   const light = e[group];
@@ -1947,6 +1995,31 @@ function HueTune({ hass }: { hass: Hass }) {
         </button>
       )}
 
+      {on && (
+        <>
+          <div style={{
+            display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+            gap: 10, marginBottom: 6,
+          }}>
+            <span style={LABEL}>Brightness</span>
+            {/* Only worth saying when the two disagree: in sync they are the
+                same number, and repeating it back is noise. */}
+            {manual && dayPct > 0 && Math.abs(dayPct - shownBri) >= 3 && (
+              <span style={{ fontSize: 11, color: T.faint }}>{`the hour wants ${dayPct}%`}</span>
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <GoldSlider value={shownBri} ariaLabel="Hue brightness" onChange={setBrightness} />
+            </div>
+            <span style={{
+              fontSize: 13, color: T.dim, width: 38, textAlign: 'right',
+              fontVariantNumeric: 'tabular-nums',
+            }}>{`${Math.round(shownBri)}%`}</span>
+          </div>
+        </>
+      )}
+
       <span style={{ ...LABEL, display: 'block', marginBottom: 8 }}>Warmth</span>
       <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
         {KELVIN_PRESETS.map((k) => (
@@ -1986,8 +2059,8 @@ function HueTune({ hass }: { hass: Hass }) {
       </div>
 
       <div style={{ fontSize: 11, color: T.faint, marginTop: 12, lineHeight: 1.55 }}>
-        Picking any of these hands the lights to you and Adaptive Lighting steps back,
-        until you send them back to the hour. Range {minK}–{maxK}K.
+        Dimming or picking any of these hands the lights to you and Adaptive Lighting
+        steps back, until you send them back to the hour. Range {minK}–{maxK}K.
       </div>
     </Glass>
   );
