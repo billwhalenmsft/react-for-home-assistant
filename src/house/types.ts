@@ -221,6 +221,20 @@ export interface EntityMap {
   nextWatering?: string;
   /** Driest of the pots — what the watering reminder actually watches. */
   soilLow?: string;
+  /**
+   * Rolled-up tent health from packages/grow_plan.yaml. State is the worst
+   * live severity; `issues` carries the list, worst first. Every grow alert
+   * is evaluated in HA so the phone and this panel cannot drift apart - they
+   * already did once, when the board watched one soil probe and the push
+   * automations watched another.
+   */
+  growStatus?: string;
+  /** Leaf-corrected VPD and its stage band, from packages/grow_vpd.yaml.
+   *  Preferred over the GrowHub's own figure, which is computed at AIR
+   *  temperature and so overstates VPD by roughly a whole band width. */
+  growVpd?: string;
+  growVpdTarget?: string;
+  tempTarget?: string;
   harvestWindow?: string;
   growOnline: string[];
   plantA: { name: string; planted: string; stage: string };

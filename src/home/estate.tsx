@@ -756,6 +756,12 @@ function Masthead({ hass, narrow }: { hass: Hass; narrow: boolean }) {
  * genuine emergency (soil critical: the plants die if this is ignored) earns
  * a slot on both.
  */
+/**
+ * One evaluated tent condition, as produced by sensor.grow_status in
+ * packages/grow_plan.yaml. Mirrors that template's dict keys exactly.
+ */
+type GrowIssue = { sev: 'alert' | 'warn' | 'info'; scope?: 'grow' | 'both'; text: string };
+
 type Attention = {
   text: string;
   tone: 'alert' | 'warn' | 'info';
@@ -806,7 +812,7 @@ function useAttention(hass: Hass): Attention[] {
     E.lock, E.garage1, E.garage2, E.soil, E.water, E.washer, E.dryer, E.waste,
     E.laundryWasherFlag, E.laundryDryerFlag,
     // Optional — only present once packages/grow_plan.yaml is installed.
-    ...([E.soilLow, E.rhTarget, E.tentHum, E.nextWatering].filter(Boolean) as string[]),
+    ...([E.soilLow, E.rhTarget, E.tentHum, E.nextWatering, E.growStatus].filter(Boolean) as string[]),
     ...E.doors.map(([, id]) => id), ...E.growOnline,
     // From packages/watchdog.yaml. A device that has gone quiet is exactly
     // what this board is for, and it already carries the garage and grow
@@ -832,33 +838,23 @@ function useAttention(hass: Hass): Attention[] {
   }
   if (e[E.lock]?.state === 'unlocked') add('Front door is unlocked', 'alert');
 
-  // --- grow: the tent has no slack, so these outrank housekeeping ---------
-  // Read the DRIEST pot, not one nominated probe. There are two pots and they
-  // dry at different rates - CH1 sits in a saucer and runs wetter - so watching
-  // a single probe is how the other plant gets missed.
-  const soilEnt = e[E.soilLow ?? ''] ?? e[E.soil];
-  const soil = num(soilEnt);
-  const pot = (attr(soilEnt, 'driest_pot') as string | undefined) ?? 'Grow';
-  // Soil critical is the one tent condition that is genuinely urgent - ignore
-  // it and the plants are gone - so it earns a place on the house board too.
-  // The recipe rides along because the answer should arrive with the problem.
-  if (soil >= 0 && soil < 20) {
-    const next = e[E.nextWatering ?? '']?.state;
-    const what = next === 'Feed' ? ' - feed' : next ? ' - plain water' : '';
-    add(`${pot} soil critical - ${Math.round(soil)}%${what}`, 'alert', undefined, 'both');
+  // --- grow ---------------------------------------------------------------
+  // Deliberately NOT evaluated here. Every tent rule lives in HA, in
+  // packages/grow_plan.yaml, and arrives pre-judged on sensor.grow_status.
+  //
+  // This used to be a second implementation of the same rules, and the two
+  // drifted exactly the way duplicated logic does: this board watched one soil
+  // probe while the push automations watched another, so one pot sat unguarded
+  // for a week after the second probe went in. One source, two renderers.
+  const growIssues = (attr(e[E.growStatus ?? ''], 'issues') as GrowIssue[] | undefined) ?? [];
+  for (const g of growIssues) {
+    const tone: Attention['tone'] = g.sev === 'alert' ? 'alert' : g.sev === 'warn' ? 'warn' : 'info';
+    add(g.text, tone, undefined, g.scope === 'both' ? 'both' : 'grow');
   }
-  // Humidity is the lever most likely to cost buds later: dense flower sitting
-  // well above target is how botrytis starts. Only while actually flowering -
-  // in veg a high RH is fine and this would just be noise.
-  const rhTarget = num(e[E.rhTarget ?? '']);
-  const rhNow = num(e[E.tentHum]);
-  if (rhTarget > 0 && rhNow > 0 && rhNow - rhTarget > 8) {
-    add(`Tent humidity ${Math.round(rhNow)}% vs ${Math.round(rhTarget)}% target`, 'warn', undefined, 'grow');
-  }
+  // The reservoir is not in that set: the H19's level sensor has been proven
+  // unreliable across two head units, so it stays a local, softer signal.
   const water = num(e[E.water]);
   if (water >= 0 && water < 25) add(`Humidifier reservoir ${Math.round(water)}%`, 'warn', undefined, 'grow');
-  const offline = E.growOnline.filter((id) => e[id] && e[id].state !== 'on').length;
-  if (offline > 0) add(`${offline} grow device${offline > 1 ? 's' : ''} offline`, 'alert', undefined, 'grow');
 
   // --- the house going quiet ---------------------------------------------
   // Alert, not warn. Six days of a dead Zigbee coordinator and nine of dark
@@ -4464,7 +4460,7 @@ function GrowPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
     E.soil, E.soilBatt, E.tentTemp, E.tentHum, E.tentVpd, E.water, E.stage,
     E.plantA.name, E.plantA.planted, E.plantA.stage,
     E.plantB.name, E.plantB.planted, E.plantB.stage, ...E.growOnline,
-    ...([E.soilB, E.soilBBatt].filter(Boolean) as string[]),
+    ...([E.soilB, E.soilBBatt, E.growVpd, E.growVpdTarget, E.tempTarget, E.rhTarget].filter(Boolean) as string[]),
   ], []);
   const e = useEntities(hass, ids);
   // CH1 = Blueberry, CH2 = Banana Kush. The ring tracks whichever is DRIEST,
@@ -4478,10 +4474,14 @@ function GrowPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   // Tent housekeeping lives here rather than on the house board.
   const tentAttention = useAttention(hass).filter((a) => a.scope === 'grow' || a.scope === 'both');
 
-  const stat = (label: string, value: string) => (
+  // A vital reads as "is this right?", not "what is this?" - so every one
+  // carries its target and is coloured against it. A bare 61% tells you
+  // nothing; 61% under a 50% target tells you to go open a window.
+  const stat = (label: string, value: string, target?: string, tone?: string) => (
     <div>
-      <div style={{ fontSize: 22, fontWeight: 250 }}>{value}</div>
+      <div style={{ fontSize: 22, fontWeight: 250, color: tone ?? T.text }}>{value}</div>
       <div style={{ ...LABEL, fontSize: 9.5, marginTop: 3 }}>{label}</div>
+      {target && <div style={{ fontSize: 10, color: T.dim, marginTop: 2 }}>{target}</div>}
     </div>
   );
 
@@ -4520,10 +4520,33 @@ function GrowPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
       <Glass span={narrow ? 1 : 2}>
         <PanelHead label="Tent climate" right={<span style={{ fontSize: 11.5, color: T.dim }}>{titleize(e[E.stage]?.state)}</span>} />
         <div style={{ display: 'flex', gap: narrow ? 22 : 44, flexWrap: 'wrap', marginTop: 6 }}>
-          {stat('Temp', `${num(e[E.tentTemp]) ? num(e[E.tentTemp]).toFixed(1) : '—'}°F`)}
-          {stat('Humidity', `${num(e[E.tentHum]) ? Math.round(num(e[E.tentHum])) : '—'}%`)}
-          {stat('VPD', `${e[E.tentVpd]?.state ?? '—'} kPa`)}
-          {stat('Reservoir', `${Number.isFinite(water) ? Math.round(water) : '—'}%`)}
+          {(() => {
+            const t = num(e[E.tentTemp]);
+            const tT = num(e[E.tempTarget ?? '']);
+            const rh = num(e[E.tentHum]);
+            const rhT = num(e[E.rhTarget ?? '']);
+            // Leaf-corrected VPD where available; the band is "lo-hi" text.
+            const v = E.growVpd ? num(e[E.growVpd]) : num(e[E.tentVpd]);
+            const band = e[E.growVpdTarget ?? '']?.state ?? '';
+            const [lo, hi] = band.includes('-')
+              ? band.split('-').map((x) => parseFloat(x))
+              : [NaN, NaN];
+            return (
+              <>
+                {stat('Temp', `${t ? t.toFixed(1) : '—'}°F`,
+                  tT > 0 ? `target ${Math.round(tT)}°` : undefined,
+                  tT > 0 && Math.abs(t - tT) > 6 ? T.warn : undefined)}
+                {stat('Humidity', `${rh ? Math.round(rh) : '—'}%`,
+                  rhT > 0 ? `target ${Math.round(rhT)}%` : undefined,
+                  rhT > 0 && rh - rhT > 8 ? T.warn : undefined)}
+                {stat('VPD', `${Number.isFinite(v) && v > 0 ? v.toFixed(2) : '—'}`,
+                  band ? `band ${band}` : undefined,
+                  Number.isFinite(lo) && (v < lo - 0.3 || v > hi + 0.3) ? T.alert
+                    : Number.isFinite(lo) && (v < lo || v > hi) ? T.warn : undefined)}
+                {stat('Reservoir', `${Number.isFinite(water) ? Math.round(water) : '—'}%`)}
+              </>
+            );
+          })()}
         </div>
         <div style={{ marginTop: 20, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {E.growOnline.map((id) => {
