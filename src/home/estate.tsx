@@ -2110,6 +2110,12 @@ const FACE_SWEEP = 270;
  */
 const DEADBAND = 3;
 
+/* Pacing for Google's SDM API, which rate-limits thermostat commands. */
+const SETTLE_MS = 1500;       // dial left alone this long before anything is sent
+const MIN_GAP_MS = 8000;      // never two commands closer than this
+const RETRY_BASE_MS = 30000;  // first retry after a 429; doubles each time
+const MAX_RETRIES = 3;        // 30s, 60s, 120s, then give up and say so
+
 const clampT = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 function NestFace({
@@ -2321,14 +2327,27 @@ function ClimateDial({ hass }: { hass: Hass }) {
   // Minnesota it is the one you reach for eight months of the year.
   const [focus, setFocus] = useState<'lo' | 'hi'>('lo');
 
-  // Google's SDM API rate-limits thermostat commands per user, and it does not
-  // take much to trip: four taps a few hundred ms apart earned a 429
-  // RESOURCE_EXHAUSTED. So taps move a local draft and only the settled value
-  // is sent, once the user stops pressing. One gesture, one command.
+  // Google's SDM API rate-limits thermostat commands, and ordinary use trips
+  // it. On 2026-09-24 six range writes landed in 24 seconds from this card and
+  // the next three came back 429 RESOURCE_EXHAUSTED. So:
+  //
+  //  - taps and drags move a local draft; nothing is sent until the dial has
+  //    been left alone for SETTLE_MS,
+  //  - no two commands go out closer than MIN_GAP_MS, however many times the
+  //    dial is nudged - what goes out is always the LATEST value, never a
+  //    queue of stale ones,
+  //  - a 429 keeps the change and retries it with backoff, rather than
+  //    throwing it away and snapping the dial back, which only invited the
+  //    next tap straight into the next 429.
   const [draft, setDraft] = useState<Draft | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const sendTimer = useRef<number | undefined>(undefined);
   const holdTimer = useRef<number | undefined>(undefined);
+  /** The newest setpoint payload not yet accepted by the Nest. */
+  const pendingRef = useRef<Record<string, number> | null>(null);
+  /** No command may leave before this timestamp (ms). */
+  const notBefore = useRef(0);
+  const retries = useRef(0);
 
   // The authoritative draft lives in a ref, not in state. A fast drag delivers
   // several moves inside a single React tick, and batched state hands every
@@ -2341,14 +2360,20 @@ function ClimateDial({ hass }: { hass: Hass }) {
     window.clearTimeout(sendTimer.current);
     window.clearTimeout(holdTimer.current);
   };
+  /** Forget an unsent setpoint entirely - timers, payload and retry count. */
+  const dropPending = () => {
+    cancelPending();
+    pendingRef.current = null;
+    retries.current = 0;
+  };
 
   // Switching zones must not carry one stat's draft over to the other.
-  useEffect(() => { setDraftValue(null); setNotice(null); }, [zi]);
-  useEffect(() => () => cancelPending(), []);
+  useEffect(() => { dropPending(); setDraftValue(null); setNotice(null); }, [zi]);
+  useEffect(() => () => dropPending(), []);
 
   // A mode change rewrites which setpoints even exist, so a half-typed number
   // from the old mode has to go rather than be sent into the new one.
-  useEffect(() => { cancelPending(); setDraftValue(null); }, [mode]);
+  useEffect(() => { dropPending(); setDraftValue(null); }, [mode]);
 
   const fail = (what: string) => (err: unknown) => {
     const msg = String((err as { message?: string })?.message ?? err);
@@ -2365,20 +2390,61 @@ function ClimateDial({ hass }: { hass: Hass }) {
   const eco = preset === 'eco';
   const locked = off || eco;
 
+  /* Send whatever is newest, once both the settle and the pacing allow it. */
+  const flush = () => {
+    const payload = pendingRef.current;
+    if (!payload) return;
+    const wait = notBefore.current - Date.now();
+    if (wait > 0) {
+      sendTimer.current = window.setTimeout(flush, wait);
+      return;
+    }
+    pendingRef.current = null;
+    notBefore.current = Date.now() + MIN_GAP_MS;
+    hass.callService('climate', 'set_temperature', payload, { entity_id: zone.entity }).then(
+      () => {
+        retries.current = 0;
+        setNotice(null);
+        // A newer value queued while this was in flight has its own timer;
+        // only release the draft once nothing else is waiting. The hold stops
+        // the ring snapping back to the old value while the SDM round-trip
+        // lands in HA's state.
+        if (!pendingRef.current) {
+          holdTimer.current = window.setTimeout(() => setDraftValue(null), 4000);
+        }
+      },
+      (err: unknown) => {
+        const msg = String((err as { message?: string })?.message ?? err);
+        const limited = /429|RESOURCE_EXHAUSTED|Too Many Requests/i.test(msg);
+        if (limited && retries.current < MAX_RETRIES) {
+          // Keep the change. If the user has moved the dial again since, the
+          // newer value is already pending and wins; otherwise re-queue this.
+          if (!pendingRef.current) pendingRef.current = payload;
+          const backoff = RETRY_BASE_MS * 2 ** retries.current;
+          retries.current += 1;
+          notBefore.current = Date.now() + backoff;
+          setNotice(`Nest is rate-limiting \u2014 retrying in ${Math.round(backoff / 1000)}s`);
+          window.clearTimeout(sendTimer.current);
+          sendTimer.current = window.setTimeout(flush, backoff);
+          return;
+        }
+        retries.current = 0;
+        setNotice(limited
+          ? 'Nest would not take it \u2014 try again in a few minutes'
+          : 'Could not set temperature');
+        setDraftValue(null);
+      }
+    );
+  };
+
   const send = (data: Record<string, number>, next: Draft) => {
     setDraftValue(next);
-    setNotice(null);
+    // A retry countdown stays on screen until the retry resolves: the user
+    // changing their mind does not make Google any less rate-limited.
+    if (retries.current === 0) setNotice(null);
+    pendingRef.current = data;
     cancelPending();
-    sendTimer.current = window.setTimeout(() => {
-      hass.callService('climate', 'set_temperature', data, { entity_id: zone.entity }).then(
-        () => {
-          // Hold the draft briefly so the ring doesn't snap back to the old
-          // value while the SDM round-trip lands.
-          holdTimer.current = window.setTimeout(() => setDraftValue(null), 4000);
-        },
-        (err: unknown) => { fail('Could not set temperature')(err); setDraftValue(null); }
-      );
-    }, 900);
+    sendTimer.current = window.setTimeout(flush, SETTLE_MS);
   };
 
   const bump = (delta: number) => {
@@ -2409,18 +2475,25 @@ function ClimateDial({ hass }: { hass: Hass }) {
     send({ temperature: next }, { kind: 'single', t: next });
   };
 
+  /* Mode, Eco and fan are deliberate one-tap commands, so they go straight out
+     rather than waiting their turn - but they spend the same Google budget, so
+     a setpoint change right after one waits out the gap. */
+  const spent = () => { notBefore.current = Math.max(notBefore.current, Date.now() + MIN_GAP_MS); };
+
   const setHvac = (m: string) => {
     if (m === mode) return;
-    cancelPending();
+    dropPending();
     setDraftValue(null);
     setNotice(null);
+    spent();
     hass.callService('climate', 'set_hvac_mode', { hvac_mode: m }, { entity_id: zone.entity })
       .catch(fail('Could not change mode'));
   };
 
   const toggleEco = () => {
-    cancelPending();
+    dropPending();
     setDraftValue(null);
+    spent();
     hass.callService(
       'climate', 'set_preset_mode',
       { preset_mode: eco ? 'none' : 'eco' }, { entity_id: zone.entity }
@@ -2434,6 +2507,7 @@ function ClimateDial({ hass }: { hass: Hass }) {
       ? (fanModes.find((f) => f === 'off') ?? fanModes[0])
       : (fanModes.find((f) => f === 'on') ?? fanModes[0]);
     if (!nextFan || nextFan === fanMode) return;
+    spent();
     hass.callService('climate', 'set_fan_mode', { fan_mode: nextFan }, { entity_id: zone.entity })
       .catch(fail('Could not change the fan'));
   };
