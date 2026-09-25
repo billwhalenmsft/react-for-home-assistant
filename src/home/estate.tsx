@@ -5961,6 +5961,9 @@ function SettingsPage({ hass, narrow, prefs, savePrefs }: {
         <SettingSlider hass={hass} entity="input_number.watchdog_battery_pct"
           label="Flag batteries below"
           hint="Low enough to be worth an errand, high enough to beat the device going dark." />
+        <SettingBooleanToggle hass={hass} entity="input_boolean.nas_uplink_alerts"
+          label="NAS network drops"
+          hint="When the NAS gets its network back, says when it went down and for how long. It cannot warn you during the outage - nothing on the NAS can reach your phone then." />
       </Glass>
 
       <Glass>
