@@ -33,6 +33,11 @@ export const SAMPLE_HOUSE: HouseConfig = {
     { id: 'person.riley', name: 'Riley', note: 'Away at school' },
   ],
 
+  couple: [
+    { key: 'bill', person: 'person.bill', name: 'Bill', focus: 'binary_sensor.bill_iphone_focus' },
+    { key: 'erin', person: 'person.erin', name: 'Erin', focus: 'binary_sensor.erin_iphone_focus' },
+  ],
+
   entities: {
     // A template sensor summarising the house in one line.
     headline: 'sensor.house_headline',

@@ -5,6 +5,7 @@ import {
 import { createPortal } from 'react-dom';
 import { useEntities, useEntity } from '../ha/useEntities';
 import { useUserData } from '../ha/useUserData';
+import { HaCard } from '../ha/HaCard';
 import { useTodoList, type TodoItem } from '../ha/useTodoList';
 import {
   SKY_TARGETS, verdictFor, type SkyTarget, type SkyNow,
@@ -97,6 +98,7 @@ const P = {
   more: 'M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
   cog: 'M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z',
   printer: 'M19 8h-1V3H6v5H5a3 3 0 00-3 3v6h4v4h12v-4h4v-6a3 3 0 00-3-3M8 5h8v3H8V5m8 15H8v-5h8v5m3-7a1 1 0 11-1-1 1 1 0 011 1Z',
+  heart: 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z',
   // Thermostat modes. Material's whatshot / ac_unit / swap_vert, and MDI's fan.
   flame: 'M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-.36 3.6-1.21 4.62-2.58.39 1.29.59 2.65.59 4.04 0 2.65-2.15 4.8-4.8 4.8z',
   snowflake: 'M22 11h-4.17l3.24-3.24-1.41-1.42L15 11h-2V9l4.66-4.66-1.42-1.41L13 6.17V2h-2v4.17L7.76 2.93 6.34 4.34 11 9v2H9L4.34 6.34 2.93 7.76 6.17 11H2v2h4.17l-3.24 3.24 1.41 1.42L9 13h2v2l-4.66 4.66 1.42 1.41L11 17.83V22h2v-4.17l3.24 3.24 1.42-1.41L13 15v-2h2l4.66 4.66 1.41-1.42L17.83 13H22v-2z',
@@ -304,7 +306,7 @@ const SCENES: ReadonlyArray<Scene> = HOUSE.scenes;
 
 /* ================================================================ shell */
 
-type Page = 'home' | 'rooms' | 'people' | 'profile' | 'cinema' | 'security' | 'grow' | 'sky' | 'printers' | 'guitar' | 'settings';
+type Page = 'home' | 'rooms' | 'people' | 'us' | 'profile' | 'cinema' | 'security' | 'grow' | 'sky' | 'printers' | 'guitar' | 'settings';
 
 /**
  * `optional` pages are OFF for everybody until a user turns them on in Setup.
@@ -313,7 +315,7 @@ type Page = 'home' | 'rooms' | 'people' | 'profile' | 'cinema' | 'security' | 'g
  * rest of the house. Different from `adminOnly`, which is a role check the
  * user cannot alter.
  */
-type NavItem = { id: Page; label: string; icon: string; adminOnly?: boolean; optional?: boolean };
+type NavItem = { id: Page; label: string; icon: string; adminOnly?: boolean; optional?: boolean; couple?: boolean };
 
 /**
  * `adminOnly` keeps house-wide dials off non-admin phones entirely, rather
@@ -333,6 +335,9 @@ const NAV: ReadonlyArray<NavItem> = [
   { id: 'security', label: 'Security', icon: P.shield },
   { id: 'grow', label: 'Grow', icon: P.leaf },
   { id: 'people', label: 'People', icon: P.people },
+  // Only Bill and Erin: see coupleMe(). Hidden from everyone else rather than
+  // shown as a tab that leads nowhere, same as adminOnly.
+  { id: 'us', label: 'Us', icon: P.heart, couple: true },
   { id: 'cinema', label: 'Cinema', icon: P.cinema },
   { id: 'sky', label: 'Sky', icon: P.sky },
   { id: 'profile', label: 'Profile', icon: P.person },
@@ -366,6 +371,7 @@ const LOCKED_VISIBLE = new Set<string>(['home', 'profile']);
 const PAGE_HINT: Record<string, string> = {
   printers: 'Bambu H2D and X1C -- chamber cameras and job status.',
   guitar: 'A 52-song syllabus, two a week, with tab links.',
+  us: 'Just for Bill and Erin: how you are each doing, and what would help.',
 };
 
 /** Default: everything on except the optional pages, in the order NAV declares. */
@@ -374,19 +380,21 @@ function defaultPrefs(): NavPrefs {
 }
 
 /** Role check, then the user's own hidden list, then their own order. */
-function visibleNav(admin: boolean, prefs: NavPrefs) {
+function visibleNav(admin: boolean, prefs: NavPrefs, couple = false) {
   const rank = new Map(prefs.order.map((id, i) => [id, i]));
   return NAV
     .filter((n) => admin || !n.adminOnly)
+    .filter((n) => couple || !n.couple)
     .filter((n) => LOCKED_VISIBLE.has(n.id) || !prefs.hidden.includes(n.id))
     .sort((a, b) => (rank.get(a.id) ?? 99) - (rank.get(b.id) ?? 99));
 }
 
 /** Role check and order, but ignoring hidden -- this is what Profile lists. */
-function orderedNav(admin: boolean, prefs: NavPrefs) {
+function orderedNav(admin: boolean, prefs: NavPrefs, couple = false) {
   const rank = new Map(prefs.order.map((id, i) => [id, i]));
   return NAV
     .filter((n) => admin || !n.adminOnly)
+    .filter((n) => couple || !n.couple)
     .sort((a, b) => (rank.get(a.id) ?? 99) - (rank.get(b.id) ?? 99));
 }
 
@@ -414,6 +422,7 @@ function sectionFromHash(): string {
 
 export function EstateApp({ hass }: { hass: Hass }) {
   const admin = hass.user?.is_admin === true;
+  const loveMe = coupleMe(hass);
   const [page, setPageState] = useState<Page>(pageFromHash);
   const narrow = useNarrow();
 
@@ -472,7 +481,7 @@ export function EstateApp({ hass }: { hass: Hass }) {
 
       <AmbientLayer hass={hass} />
 
-      {!narrow && <Rail page={page} setPage={setPage} admin={admin} prefs={navPrefs} />}
+      {!narrow && <Rail page={page} setPage={setPage} admin={admin} couple={!!loveMe} prefs={navPrefs} />}
 
       <main style={{
         flex: 1, minWidth: 0, padding: narrow ? '20px 16px 96px' : '30px 38px 48px',
@@ -484,6 +493,9 @@ export function EstateApp({ hass }: { hass: Hass }) {
           {page === 'home' && <HomePage hass={hass} narrow={narrow} go={setPage} />}
           {page === 'rooms' && <RoomsPage hass={hass} narrow={narrow} />}
           {page === 'people' && <PeoplePage hass={hass} narrow={narrow} />}
+          {page === 'us' && (loveMe
+            ? <UsPage hass={hass} narrow={narrow} me={loveMe} />
+            : <HomePage hass={hass} narrow={narrow} go={setPage} />)}
           {page === 'profile' && <ProfilePage hass={hass} narrow={narrow}
             admin={admin} navPrefs={navPrefs} savePrefs={saveNav} />}
           {page === 'cinema' && <CinemaPage hass={hass} narrow={narrow} />}
@@ -501,15 +513,15 @@ export function EstateApp({ hass }: { hass: Hass }) {
         </div>
       </main>
 
-      {narrow && <BottomBar page={page} setPage={setPage} admin={admin} prefs={navPrefs} />}
+      {narrow && <BottomBar page={page} setPage={setPage} admin={admin} couple={!!loveMe} prefs={navPrefs} />}
     </div>
   );
 }
 
-function Rail({ page, setPage, admin, prefs }: {
-  page: Page; setPage: (p: Page) => void; admin: boolean; prefs: NavPrefs;
+function Rail({ page, setPage, admin, couple, prefs }: {
+  page: Page; setPage: (p: Page) => void; admin: boolean; couple: boolean; prefs: NavPrefs;
 }) {
-  const items = visibleNav(admin, prefs);
+  const items = visibleNav(admin, prefs, couple);
   return (
     <nav aria-label="Sections" style={{
       width: 86, flex: 'none', borderRight: `1px solid ${T.line}`,
@@ -548,11 +560,11 @@ function Rail({ page, setPage, admin, prefs }: {
   );
 }
 
-function BottomBar({ page, setPage, admin, prefs }: {
-  page: Page; setPage: (p: Page) => void; admin: boolean; prefs: NavPrefs;
+function BottomBar({ page, setPage, admin, couple, prefs }: {
+  page: Page; setPage: (p: Page) => void; admin: boolean; couple: boolean; prefs: NavPrefs;
 }) {
   const [more, setMore] = useState(false);
-  const items = visibleNav(admin, prefs);
+  const items = visibleNav(admin, prefs, couple);
   // The bar is the top four of the user's own order; the rest go in More.
   const primary = items.slice(0, 4);
   const rest = items.slice(4);
@@ -3113,7 +3125,7 @@ function ProfilePage({ hass, narrow, admin, navPrefs, savePrefs }: {
     </label>
   );
 
-  const pageRows = orderedNav(admin, navPrefs);
+  const pageRows = orderedNav(admin, navPrefs, !!coupleMe(hass));
 
   /* Swap with the neighbour rather than splice-and-insert: with a short list
      and two arrow buttons that is exactly what the user is asking for, and it
@@ -3548,6 +3560,405 @@ function MealWeek({ hass, span }: { hass: Hass; span?: number }) {
         {' '}Skylight is the source; change it there.
       </div>
     </Glass>
+  );
+}
+
+/* ==================================================================== us */
+
+/*
+ * Us: a check-in board for Bill and Erin.
+ *
+ * Erin lives with chronic pain and migraines, and a hard day does not always
+ * show from the outside. Each of them says how they are (1-10), what would
+ * help, and anything the other should know; the other hears about it and can
+ * answer with "I see you". The rules - who gets told, how loudly - live in
+ * packages/love_board.yaml, so this page only reads helpers and calls two
+ * scripts.
+ *
+ * Visible only to the two HA users linked to the couple's person entities.
+ * That is hiding, not secrecy: HA has no per-entity permissions, so any
+ * logged-in user could read these helpers through the raw API.
+ */
+
+type CoupleMember = { key: string; person: string; name: string; focus?: string };
+
+/** Which of the couple is signed in, if either. Matched by HA user id. */
+function coupleMe(hass: Hass): CoupleMember | undefined {
+  const uid = hass.user?.id;
+  if (!uid) return undefined;
+  return (HOUSE.couple ?? []).find((c) => attr(hass.states[c.person], 'user_id') === uid);
+}
+
+const US_HELP = [
+  'Quiet house', 'Take the kids', 'Handle dinner', 'Check on me', 'A hug',
+  'Space', 'Let me rest', 'Run an errand', 'Just be close',
+];
+const US_STATUS = ['Available', 'Working', 'Do not disturb', 'Resting'] as const;
+
+const levelTone = (n: number) => (n <= 3 ? T.alert : n <= 6 ? T.warn : T.ok);
+const levelWord = (n: number) =>
+  ['', 'Rough', 'Rough', 'Hard day', 'Hard day', 'Getting by', 'Getting by', 'Good', 'Good', 'Great', 'Great'][n] ?? '';
+
+/** An input_datetime as epoch ms, or null for the "never" sentinel (1970). */
+function whenOf(e?: HassEntity): number | null {
+  const t = Number(attr(e, 'timestamp'));
+  return Number.isFinite(t) && t > 946684800 ? t * 1000 : null;
+}
+
+function agoText(ms: number, now: number): string {
+  const m = Math.round((now - ms) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 20) return `${h} h ago`;
+  const d = new Date(ms);
+  const y = new Date(now); y.setDate(y.getDate() - 1);
+  if (d.toDateString() === y.toDateString()) return 'yesterday';
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+/** Everything the board knows about one person, parsed once. */
+function useLove(hass: Hass, m: CoupleMember) {
+  const ids = useMemo(() => [
+    `input_number.love_${m.key}_level`, `input_text.love_${m.key}_note`,
+    `input_text.love_${m.key}_help`, `input_text.love_${m.key}_tell`,
+    `input_select.love_${m.key}_status`, `input_datetime.love_${m.key}_checked_in`,
+    `input_datetime.love_${m.key}_seen`, ...(m.focus ? [m.focus] : []),
+  ], [m.key, m.focus]);
+  const e = useEntities(hass, ids);
+  const text = (id: string) => {
+    const v = e[id]?.state;
+    return v && !['unknown', 'unavailable'].includes(v) ? v : '';
+  };
+  const checked = whenOf(e[`input_datetime.love_${m.key}_checked_in`]);
+  const seen = whenOf(e[`input_datetime.love_${m.key}_seen`]);
+  const focusState = m.focus ? e[m.focus]?.state : undefined;
+  return {
+    level: Math.round(Number(e[`input_number.love_${m.key}_level`]?.state) || 0),
+    note: text(`input_text.love_${m.key}_note`),
+    help: text(`input_text.love_${m.key}_help`),
+    tell: text(`input_text.love_${m.key}_tell`),
+    status: text(`input_select.love_${m.key}_status`) || 'Available',
+    checked,
+    // Seen only counts if it happened after the latest check-in.
+    seenAfter: checked != null && seen != null && seen >= checked ? seen : null,
+    focus: focusState === 'on' ? 'on' : focusState === 'off' ? 'off' : 'unknown',
+  };
+}
+
+function Chip({ on, children, onClick, tone }: {
+  on: boolean; children: ReactNode; onClick?: () => void; tone?: string;
+}) {
+  const c = tone ?? T.gold;
+  return (
+    <button
+      type="button" onClick={onClick} aria-pressed={on} className="est-tap"
+      disabled={!onClick}
+      style={{
+        font: 'inherit', fontSize: 12, padding: '6px 11px', borderRadius: 999,
+        cursor: onClick ? 'pointer' : 'default',
+        border: `1px solid ${on ? c : T.line}`,
+        background: on ? 'rgba(211,176,110,0.12)' : 'transparent',
+        color: on ? c : T.dim,
+      }}
+    >{children}</button>
+  );
+}
+
+function StatusLine({ status, focus }: { status: string; focus: string }) {
+  const busy = status === 'Working' || status === 'Do not disturb';
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 12 }}>
+      <span style={{
+        padding: '3px 10px', borderRadius: 999, border: `1px solid ${busy ? T.warn : T.line}`,
+        color: busy ? T.warn : T.dim,
+      }}>{status}</span>
+      {focus === 'on' && (
+        <span style={{ padding: '3px 10px', borderRadius: 999, border: `1px solid ${T.info}`, color: T.info }}>
+          Focus on
+        </span>
+      )}
+    </div>
+  );
+}
+
+/* Your own check-in: edit, then send. Status changes apply immediately. */
+function UsMine({ hass, me, partner }: { hass: Hass; me: CoupleMember; partner: CoupleMember }) {
+  const cur = useLove(hass, me);
+  const now = useNow(60000).getTime();
+
+  const [level, setLevel] = useState<number | null>(null);
+  const [note, setNote] = useState('');
+  const [help, setHelp] = useState<string[]>([]);
+  const [extra, setExtra] = useState('');
+  const [tell, setTell] = useState('');
+  const [sending, setSending] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+
+  // Start from what is saved, once it has loaded. After that the draft is the
+  // user's; a later state update must not overwrite what they are typing.
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current || cur.checked == null) return;
+    seeded.current = true;
+    setLevel(cur.level || null);
+    setNote(cur.note);
+    const parts = cur.help ? cur.help.split(/\s*,\s*/).filter(Boolean) : [];
+    setHelp(parts.filter((p) => US_HELP.includes(p)));
+    setExtra(parts.filter((p) => !US_HELP.includes(p)).join(', '));
+    setTell(cur.tell);
+  }, [cur.checked, cur.level, cur.note, cur.help, cur.tell]);
+
+  const toggleHelp = (h: string) =>
+    setHelp((prev) => (prev.includes(h) ? prev.filter((x) => x !== h) : [...prev, h]));
+
+  const send = () => {
+    if (level == null) return;
+    const helpText = [...help, ...extra.split(/\s*,\s*/).filter(Boolean)].join(', ').slice(0, 255);
+    setSending('sending');
+    hass.callService('script', 'love_check_in', {
+      who: me.key, level, note: note.slice(0, 255), help: helpText, tell: tell.slice(0, 255),
+    }).then(
+      () => { setSending('sent'); window.setTimeout(() => setSending('idle'), 3000); },
+      () => setSending('error'),
+    );
+  };
+
+  const setStatus = (s: string) =>
+    void hass.callService('input_select', 'select_option', { option: s },
+      { entity_id: `input_select.love_${me.key}_status` });
+
+  const field: CSSProperties = {
+    width: '100%', boxSizing: 'border-box', font: 'inherit', fontSize: 14,
+    padding: '10px 12px', borderRadius: 10, border: `1px solid ${T.line}`,
+    background: 'rgba(255,255,255,0.04)', color: T.text,
+  };
+
+  return (
+    <Glass>
+      <PanelHead label={`You · ${me.name}`} right={<StatusLine status={cur.status} focus={cur.focus} />} />
+
+      <span style={{ ...LABEL, display: 'block', marginBottom: 8 }}>How are you doing?</span>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: 5 }}>
+        {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => {
+          const on = level === n;
+          return (
+            <button
+              key={n} type="button" onClick={() => setLevel(n)} aria-pressed={on}
+              aria-label={`${n} out of 10, ${levelWord(n)}`} className="est-tap"
+              style={{
+                font: 'inherit', fontSize: 15, fontWeight: on ? 600 : 400, height: 42,
+                borderRadius: 9, cursor: 'pointer',
+                border: `1px solid ${on ? levelTone(n) : T.line}`,
+                background: on ? levelTone(n) : 'transparent',
+                color: on ? '#16120b' : T.dim,
+              }}
+            >{n}</button>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 12, color: level ? levelTone(level) : T.faint, margin: '6px 0 14px', minHeight: 16 }}>
+        {level ? levelWord(level) : 'Pick a number — 1 is the worst day, 10 the best.'}
+      </div>
+
+      <span style={{ ...LABEL, display: 'block', marginBottom: 6 }}>In a sentence</span>
+      <input
+        style={field} value={note} maxLength={255} onChange={(ev) => setNote(ev.target.value)}
+        placeholder="Migraine since lunch, meds starting to work…"
+      />
+
+      <span style={{ ...LABEL, display: 'block', margin: '14px 0 8px' }}>{`What would help from ${partner.name}`}</span>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {US_HELP.map((h) => <Chip key={h} on={help.includes(h)} onClick={() => toggleHelp(h)}>{h}</Chip>)}
+      </div>
+      <input
+        style={{ ...field, marginTop: 8 }} value={extra} maxLength={120}
+        onChange={(ev) => setExtra(ev.target.value)} placeholder="Something else…"
+      />
+
+      <span style={{ ...LABEL, display: 'block', margin: '14px 0 6px' }}>{`${partner.name} should know`}</span>
+      <textarea
+        style={{ ...field, minHeight: 64, resize: 'vertical' }} value={tell} maxLength={255}
+        onChange={(ev) => setTell(ev.target.value)}
+        placeholder="Anything to pass on — or leave blank."
+      />
+
+      <button
+        type="button" onClick={send} disabled={level == null || sending === 'sending'} className="est-lift"
+        style={{
+          width: '100%', marginTop: 14, padding: '13px 16px', borderRadius: 12, font: 'inherit',
+          fontSize: 14, fontWeight: 600, cursor: level == null ? 'default' : 'pointer',
+          border: `1px solid ${T.goldDeep}`,
+          background: level == null ? 'rgba(255,255,255,0.04)' : `linear-gradient(180deg, ${T.gold}, ${T.goldDeep})`,
+          color: level == null ? T.faint : '#191408',
+        }}
+      >
+        {sending === 'sending' ? 'Sending…'
+          : sending === 'sent' ? `Sent to ${partner.name} ✓`
+            : sending === 'error' ? 'Could not send — try again'
+              : `Check in with ${partner.name}`}
+      </button>
+
+      <div style={{ fontSize: 12, color: T.dim, marginTop: 10, lineHeight: 1.5 }}>
+        {cur.checked == null
+          ? 'No check-in yet.'
+          : <>
+              {`Last check-in ${agoText(cur.checked, now)}. `}
+              {cur.seenAfter
+                ? <span style={{ color: T.ok }}>{`${partner.name} saw it ❤️ ${clock(cur.seenAfter)}`}</span>
+                : `${partner.name} hasn't seen it yet.`}
+            </>}
+      </div>
+
+      <span style={{ ...LABEL, display: 'block', margin: '16px 0 8px' }}>Your status</span>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {US_STATUS.map((s) => <Chip key={s} on={cur.status === s} onClick={() => setStatus(s)}>{s}</Chip>)}
+      </div>
+      <div style={{ fontSize: 11, color: T.faint, marginTop: 8, lineHeight: 1.5 }}>
+        {cur.focus === 'unknown'
+          ? 'Your phone is not sharing Focus mode with Home Assistant. Allow it in the Home Assistant app to show it here automatically.'
+          : 'Your phone’s Focus mode shows here automatically.'}
+        {' '}While you are Working or on Do not disturb, check-ins reach you quietly — unless it is a 3 or below.
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <SettingBooleanToggle hass={hass} entity={`input_boolean.love_notify_${me.key}`}
+          label={`Tell me when ${partner.name} checks in`}
+          hint="A push with how they are and what would help." />
+      </div>
+    </Glass>
+  );
+}
+
+/* Your partner's latest check-in, and the way to answer it. */
+function UsTheirs({ hass, partner }: { hass: Hass; partner: CoupleMember }) {
+  const cur = useLove(hass, partner);
+  const now = useNow(60000).getTime();
+  const [acking, setAcking] = useState(false);
+  const has = cur.checked != null;
+  const helps = cur.help ? cur.help.split(/\s*,\s*/).filter(Boolean) : [];
+
+  const ack = () => {
+    setAcking(true);
+    hass.callService('script', 'love_seen', { who: partner.key }).finally(() => setAcking(false));
+  };
+
+  return (
+    <Glass>
+      <PanelHead label={partner.name} right={<StatusLine status={cur.status} focus={cur.focus} />} />
+
+      {!has ? (
+        <div style={{ fontSize: 14, color: T.dim, padding: '10px 0 4px' }}>
+          {`No check-in from ${partner.name} yet.`}
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+            <span style={{ fontSize: 54, fontWeight: 200, lineHeight: 1, color: levelTone(cur.level) }}>
+              {cur.level}
+            </span>
+            <span style={{ fontSize: 15, color: T.dim }}>/10</span>
+            <span style={{ fontSize: 17, color: levelTone(cur.level) }}>{levelWord(cur.level)}</span>
+          </div>
+          <div style={{ fontSize: 12, color: T.faint, marginTop: 4 }}>{`Checked in ${agoText(cur.checked!, now)}`}</div>
+
+          {cur.note && (
+            <div style={{
+              marginTop: 14, fontSize: 15, lineHeight: 1.5, color: T.text,
+              borderLeft: `2px solid ${levelTone(cur.level)}`, paddingLeft: 12,
+            }}>{cur.note}</div>
+          )}
+
+          {helps.length > 0 && (
+            <>
+              <span style={{ ...LABEL, display: 'block', margin: '16px 0 8px' }}>What would help</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {helps.map((h) => <Chip key={h} on>{h}</Chip>)}
+              </div>
+            </>
+          )}
+
+          {cur.tell && (
+            <>
+              <span style={{ ...LABEL, display: 'block', margin: '16px 0 6px' }}>You should know</span>
+              <div style={{
+                fontSize: 14, lineHeight: 1.5, padding: '10px 12px', borderRadius: 10,
+                background: 'rgba(255,255,255,0.04)', border: `1px solid ${T.line}`,
+              }}>{cur.tell}</div>
+            </>
+          )}
+
+          <button
+            type="button" onClick={ack} disabled={acking || cur.seenAfter != null} className="est-lift"
+            style={{
+              width: '100%', marginTop: 16, padding: '12px 16px', borderRadius: 12, font: 'inherit',
+              fontSize: 14, fontWeight: 600, cursor: cur.seenAfter ? 'default' : 'pointer',
+              border: `1px solid ${cur.seenAfter ? T.line : T.goldDeep}`,
+              background: cur.seenAfter ? 'transparent' : 'rgba(211,176,110,0.12)',
+              color: cur.seenAfter ? T.ok : T.gold,
+            }}
+          >
+            {cur.seenAfter ? `You saw this ❤️ ${clock(cur.seenAfter)}` : acking ? 'Sending…' : 'I see you ❤️'}
+          </button>
+        </>
+      )}
+    </Glass>
+  );
+}
+
+/* Where everyone is. HA's own map card, fed from the family list; the list
+   under it says plainly who is not sharing a location yet. */
+function UsMap({ hass }: { hass: Hass }) {
+  const ids = useMemo(() => FAMILY.map((p) => p.id), []);
+  const e = useEntities(hass, ids);
+  const config = useMemo(() => ({
+    type: 'map',
+    entities: FAMILY.map((p) => ({ entity: p.id })),
+    hours_to_show: 0,
+    theme_mode: 'dark',
+    aspect_ratio: '16:9',
+  }), []);
+
+  return (
+    <Glass style={{ gridColumn: '1 / -1' }}>
+      <PanelHead label="Where everyone is" />
+      <div style={{ borderRadius: 12, overflow: 'hidden' }}>
+        <HaCard hass={hass} config={config} />
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 18px', marginTop: 12, fontSize: 12.5 }}>
+        {FAMILY.map((p) => {
+          const s = e[p.id];
+          const trackers = (attr(s, 'device_trackers') as string[] | undefined) ?? [];
+          const gps = attr(s, 'latitude') != null;
+          const st = s?.state;
+          const label = !trackers.length ? 'no device linked'
+            : !gps || !st || st === 'unknown' ? 'location not shared'
+              : st === 'home' ? 'home' : st === 'not_home' ? 'away' : st.replace(/_/g, ' ');
+          const known = gps && st && st !== 'unknown';
+          return (
+            <span key={p.id} style={{ color: known ? T.text : T.faint }}>
+              {p.name} <span style={{ color: known ? T.dim : T.faint }}>{`· ${label}`}</span>
+            </span>
+          );
+        })}
+      </div>
+    </Glass>
+  );
+}
+
+function UsPage({ hass, narrow, me }: { hass: Hass; narrow: boolean; me: CoupleMember }) {
+  const partner = (HOUSE.couple ?? []).find((c) => c.key !== me.key);
+  if (!partner) return null;
+  return (
+    <div style={{ display: 'grid', gap: 18, gridTemplateColumns: narrow ? '1fr' : '1fr 1fr', alignItems: 'start' }}>
+      <UsTheirs hass={hass} partner={partner} />
+      <UsMine hass={hass} me={me} partner={partner} />
+      <UsMap hass={hass} />
+      <div style={{ gridColumn: '1 / -1', fontSize: 11, color: T.faint, lineHeight: 1.6 }}>
+        {`Only ${me.name} and ${partner.name} see this page. Home Assistant has no private fields, though, so anyone with an HA login could read it through the raw data — keep medical detail to what you'd be comfortable with that.`}
+      </div>
+    </div>
   );
 }
 

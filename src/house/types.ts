@@ -305,6 +305,13 @@ export interface HouseConfig {
    */
   coords: { lat: number; lon: number };
   family: ReadonlyArray<Person>;
+  /**
+   * The two people the Us page is for. `key` names their helpers in
+   * packages/love_board.yaml (input_number.love_<key>_level, ...), `person`
+   * is the person entity whose user_id says who is signed in, and `focus`
+   * is their iPhone's Focus sensor from the companion app.
+   */
+  couple?: ReadonlyArray<{ key: string; person: string; name: string; focus?: string }>;
   entities: EntityMap;
   scenes: ReadonlyArray<Scene>;
   /** floor key -> room name -> what is in it */

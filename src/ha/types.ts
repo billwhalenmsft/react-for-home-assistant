@@ -12,7 +12,7 @@ export interface Hass {
   connection: Connection;
   themes: unknown;
   language: string;
-  user?: { name: string; is_admin: boolean };
+  user?: { id?: string; name: string; is_admin: boolean };
   callService(
     domain: string,
     service: string,
