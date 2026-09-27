@@ -5,7 +5,7 @@ import {
 import { createPortal } from 'react-dom';
 import { useEntities, useEntity } from '../ha/useEntities';
 import { useUserData } from '../ha/useUserData';
-import { HaCard } from '../ha/HaCard';
+import { FamilyMap, MAP_KEY_ENTITY } from './familymap';
 import { useTodoList, type TodoItem } from '../ha/useTodoList';
 import {
   SKY_TARGETS, verdictFor, type SkyTarget, type SkyNow,
@@ -3907,25 +3907,20 @@ function UsTheirs({ hass, partner }: { hass: Hass; partner: CoupleMember }) {
   );
 }
 
-/* Where everyone is. HA's own map card, fed from the family list; the list
-   under it says plainly who is not sharing a location yet. */
+/* Where everyone is. The panel draws this map itself: HA's own map card
+   hard-codes CARTO tiles with no key, which CARTO now refuses (see
+   familymap.tsx). The list under it says plainly who is not sharing a
+   location yet. */
 function UsMap({ hass }: { hass: Hass }) {
-  const ids = useMemo(() => FAMILY.map((p) => p.id), []);
+  const ids = useMemo(() => [...FAMILY.map((p) => p.id), MAP_KEY_ENTITY], []);
   const e = useEntities(hass, ids);
-  const config = useMemo(() => ({
-    type: 'map',
-    entities: FAMILY.map((p) => ({ entity: p.id })),
-    hours_to_show: 0,
-    theme_mode: 'dark',
-    aspect_ratio: '16:9',
-  }), []);
+  const keyState = e[MAP_KEY_ENTITY]?.state;
+  const hasKey = !!keyState && !['unknown', 'unavailable', ''].includes(keyState);
 
   return (
     <Glass style={{ gridColumn: '1 / -1' }}>
       <PanelHead label="Where everyone is" />
-      <div style={{ borderRadius: 12, overflow: 'hidden' }}>
-        <HaCard hass={hass} config={config} />
-      </div>
+      <FamilyMap hass={hass} people={FAMILY} height={340} />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 18px', marginTop: 12, fontSize: 12.5 }}>
         {FAMILY.map((p) => {
           const s = e[p.id];
@@ -3943,6 +3938,12 @@ function UsMap({ hass }: { hass: Hass }) {
           );
         })}
       </div>
+      {!hasKey && (
+        <div style={{ fontSize: 11.5, color: T.faint, marginTop: 10, lineHeight: 1.5 }}>
+          Showing plain OpenStreetMap tiles. For the dark map, paste your CARTO key into
+          Settings &rarr; Devices &amp; services &rarr; Helpers &rarr; <b>Map &middot; CARTO basemaps API key</b>.
+        </div>
+      )}
     </Glass>
   );
 }
