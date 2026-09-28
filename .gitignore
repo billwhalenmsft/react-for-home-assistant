@@ -17,3 +17,6 @@ harness-states.local.js
 # Rendered floorplans of a real building.
 fp_main.png
 local/
+
+# Local photo-library listings captured for the harness (family file names).
+harness-media.local.js

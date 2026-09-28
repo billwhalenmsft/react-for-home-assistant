@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { useEntities, useEntity } from '../ha/useEntities';
 import { useUserData } from '../ha/useUserData';
 import { FamilyMap, MAP_KEY_ENTITY } from './familymap';
+import { PhotosPage } from './photos';
 import { useTodoList, type TodoItem } from '../ha/useTodoList';
 import {
   SKY_TARGETS, verdictFor, type SkyTarget, type SkyNow,
@@ -98,6 +99,7 @@ const P = {
   more: 'M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
   cog: 'M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z',
   printer: 'M19 8h-1V3H6v5H5a3 3 0 00-3 3v6h4v4h12v-4h4v-6a3 3 0 00-3-3M8 5h8v3H8V5m8 15H8v-5h8v5m3-7a1 1 0 11-1-1 1 1 0 011 1Z',
+  photo: 'M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z',
   heart: 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z',
   // Thermostat modes. Material's whatshot / ac_unit / swap_vert, and MDI's fan.
   flame: 'M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-.36 3.6-1.21 4.62-2.58.39 1.29.59 2.65.59 4.04 0 2.65-2.15 4.8-4.8 4.8z',
@@ -306,7 +308,7 @@ const SCENES: ReadonlyArray<Scene> = HOUSE.scenes;
 
 /* ================================================================ shell */
 
-type Page = 'home' | 'rooms' | 'people' | 'us' | 'profile' | 'cinema' | 'security' | 'grow' | 'sky' | 'printers' | 'guitar' | 'settings';
+type Page = 'home' | 'rooms' | 'people' | 'us' | 'photos' | 'profile' | 'cinema' | 'security' | 'grow' | 'sky' | 'printers' | 'guitar' | 'settings';
 
 /**
  * `optional` pages are OFF for everybody until a user turns them on in Setup.
@@ -338,6 +340,7 @@ const NAV: ReadonlyArray<NavItem> = [
   // Only Bill and Erin: see coupleMe(). Hidden from everyone else rather than
   // shown as a tab that leads nowhere, same as adminOnly.
   { id: 'us', label: 'Us', icon: P.heart, couple: true },
+  { id: 'photos', label: 'Photos', icon: P.photo },
   { id: 'cinema', label: 'Cinema', icon: P.cinema },
   { id: 'sky', label: 'Sky', icon: P.sky },
   { id: 'profile', label: 'Profile', icon: P.person },
@@ -372,6 +375,7 @@ const PAGE_HINT: Record<string, string> = {
   printers: 'Bambu H2D and X1C -- chamber cameras and job status.',
   guitar: 'A 52-song syllabus, two a week, with tab links.',
   us: 'Just for Bill and Erin: how you are each doing, and what would help.',
+  photos: 'Home photos and videos from the NAS, by year and month.',
 };
 
 /** Default: everything on except the optional pages, in the order NAV declares. */
@@ -493,6 +497,7 @@ export function EstateApp({ hass }: { hass: Hass }) {
           {page === 'home' && <HomePage hass={hass} narrow={narrow} go={setPage} />}
           {page === 'rooms' && <RoomsPage hass={hass} narrow={narrow} />}
           {page === 'people' && <PeoplePage hass={hass} narrow={narrow} />}
+          {page === 'photos' && <PhotosPage hass={hass} narrow={narrow} />}
           {page === 'us' && (loveMe
             ? <UsPage hass={hass} narrow={narrow} me={loveMe} />
             : <HomePage hass={hass} narrow={narrow} go={setPage} />)}
