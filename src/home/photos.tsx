@@ -16,9 +16,9 @@
  * while QNAP is still working through the library. Originals are only ever
  * loaded one at a time, in the viewer.
  *
- * The share is organised year -> month (01-12) -> files, with a few named
- * albums alongside; months are shown by name, and the landing view pulls this
- * month from every year.
+ * One timeline, newest month first, rather than folders: see buildIndex for
+ * how the several differently-organised trees on the share are merged by
+ * month, and loadMonth for the per-month fetch that runs only on scroll.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Hass } from '../ha/types';
@@ -29,7 +29,6 @@ type Conn = Hass['connection'];
 const ROOT = 'media-source://media_source/photos';
 
 type Item = { id: string; title: string; cls: string; dir: boolean };
-type Crumb = { id: string; title: string };
 
 type BrowseResult = {
   title: string;
@@ -46,9 +45,6 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 
 const nameOf = (id: string) => decodeURIComponent(id.slice(id.lastIndexOf('/') + 1));
 const parentOf = (id: string) => id.slice(0, id.lastIndexOf('/'));
-const isYear = (t: string) => /^\d{4}$/.test(t);
-const monthLabel = (parentTitle: string, t: string) =>
-  isYear(parentTitle) && /^(0[1-9]|1[0-2])$/.test(t) ? MONTHS[Number(t) - 1] : t;
 
 /* Formats a browser can show or play itself. Anything else - Canon RAW, HEIC
    outside Safari, TIFF, MPEG-2, AVCHD - gets QNAP's s800 preview instead. */
@@ -231,142 +227,201 @@ function Viewer({ conn, items, index, onIndex, onClose }: {
   );
 }
 
-/** A folder: subfolders as chips, then a grid of its photos and videos. */
-function Folder({ conn, crumbs, onEnter, narrow }: {
-  conn: Conn; crumbs: Crumb[]; onEnter: (c: Crumb) => void; narrow: boolean;
+/* ------------------------------------------------------------ the index */
+
+/*
+ * One timeline, not folders. The library is spread over several trees that
+ * each encode the month differently:
+ *
+ *   2014/09/...                         year -> MM
+ *   Whalen Photos/2014/September 2014/  year -> "Month YYYY"
+ *   Google Photos/2014/09/              year -> MM
+ *   Whalen Videos/Whalen Family Movies/Camcorder April 2009 thru July 8 2010
+ *
+ * So the index is built from folder NAMES only - about fifty listings, no
+ * per-file work - and every folder that names a month lands in that month's
+ * bucket. A month's files are fetched only when its section nears the screen.
+ * Anything that never names a date goes in a final Undated section.
+ */
+
+const MONTH_NAMES = MONTHS.map((m) => m.toLowerCase());
+const MONTH_RE = new RegExp(`\\b(${MONTH_NAMES.join('|')}|${MONTH_NAMES.map((m) => m.slice(0, 3)).join('|')})\\.?\\s+(?:\\d{1,2},?\\s+)?((?:19|20)\\d{2})\\b`, 'i');
+
+type Bucket = { key: string; folders: string[] };
+
+function monthFromName(name: string, year: string | null): string | null {
+  if (year && /^(0[1-9]|1[0-2])$/.test(name)) return `${year}-${name}`;
+  const m = MONTH_RE.exec(name);
+  if (m) {
+    const w = m[1].toLowerCase().slice(0, 3);
+    const i = MONTH_NAMES.findIndex((n) => n.startsWith(w));
+    if (i >= 0) return `${m[2]}-${String(i + 1).padStart(2, '0')}`;
+  }
+  return null;
+}
+
+async function buildIndex(conn: Conn): Promise<Bucket[]> {
+  const buckets = new Map<string, string[]>();
+  const add = (key: string, id: string) => {
+    const list = buckets.get(key) ?? [];
+    list.push(id);
+    buckets.set(key, list);
+  };
+
+  async function walk(id: string, year: string | null, depth: number): Promise<void> {
+    const kids = await browse(conn, id).catch(() => [] as Item[]);
+    const files = kids.filter((k) => !k.dir);
+    // Loose files sit in whatever this folder dates to, or Undated.
+    if (files.length) add(year ? `${year}-00` : 'undated', id);
+    await Promise.all(kids.filter((k) => k.dir).map(async (d) => {
+      const month = monthFromName(d.title, year);
+      if (month) { add(month, d.id); return; }
+      const y = /^((?:19|20)\d{2})(?:\s*-\s*(?:19|20)\d{2})?$/.exec(d.title);
+      if (y) return walk(d.id, y[1], depth + 1);
+      if (depth < 3) return walk(d.id, year, depth + 1);
+      add(year ? `${year}-00` : 'undated', d.id);
+    }));
+  }
+
+  await walk(ROOT, null, 0);
+  return [...buckets.entries()]
+    .map(([key, folders]) => ({ key, folders }))
+    .sort((a, b) => (a.key === 'undated' ? 1 : b.key === 'undated' ? -1 : b.key.localeCompare(a.key)));
+}
+
+/* Some cameras and phones put the capture time in the file name; when they
+   do, it orders a month far better than the name itself. */
+function stampOf(name: string): number | null {
+  const d = /((?:19|20)\d{2})[-_.]?(0[1-9]|1[0-2])[-_.]?([0-2]\d|3[01])[ _T-]?(?:([01]\d|2[0-3])[.:\-_]?([0-5]\d)[.:\-_]?([0-5]\d))?/.exec(name);
+  if (d) return Date.UTC(+d[1], +d[2] - 1, +d[3], +(d[4] ?? 0), +(d[5] ?? 0), +(d[6] ?? 0));
+  const ms = /^(1[2-7]\d{11})\b/.exec(name);
+  if (ms) return Number(ms[1]);
+  return null;
+}
+
+/** Every photo and video in a month's folders, subfolders included, newest first, copies once. */
+async function loadMonth(conn: Conn, folders: string[]): Promise<Item[]> {
+  const out: Item[] = [];
+  async function collect(id: string, depth: number) {
+    const kids = await browse(conn, id).catch(() => [] as Item[]);
+    for (const k of kids) {
+      if (!k.dir) out.push(k);
+      else if (depth < 2) await collect(k.id, depth + 1);
+    }
+  }
+  for (const f of folders) await collect(f, 0);
+  const seen = new Set<string>();
+  const unique = out.filter((i) => {
+    const n = nameOf(i.id).toLowerCase();
+    if (seen.has(n)) return false;
+    seen.add(n);
+    return true;
+  });
+  return unique
+    .map((i) => ({ i, t: stampOf(nameOf(i.id)) }))
+    .sort((a, b) => (b.t ?? -1) - (a.t ?? -1) || nameOf(b.i.id).localeCompare(nameOf(a.i.id)))
+    .map((x) => x.i);
+}
+
+const bucketLabel = (key: string) => {
+  if (key === 'undated') return 'Undated';
+  const [y, m] = key.split('-');
+  return m === '00' ? `${y} · month unknown` : `${MONTHS[Number(m) - 1]} ${y}`;
+};
+
+/* ------------------------------------------------------------- the feed */
+
+function MonthSection({ conn, bucket, tile, anchor }: {
+  conn: Conn; bucket: Bucket; tile: number; anchor?: string;
 }) {
-  const here = crumbs[crumbs.length - 1];
+  const ref = useRef<HTMLElement>(null);
   const [items, setItems] = useState<Item[] | null>(null);
-  const [error, setError] = useState(false);
   const [limit, setLimit] = useState(240);
   const [open, setOpen] = useState<number | null>(null);
 
   useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
     let live = true;
-    setItems(null); setError(false); setLimit(240); setOpen(null);
-    browse(conn, here.id).then((r) => live && setItems(r), () => live && setError(true));
-    return () => { live = false; };
-  }, [conn, here.id]);
+    const io = new IntersectionObserver((es) => {
+      if (!es.some((e) => e.isIntersecting)) return;
+      io.disconnect();
+      loadMonth(conn, bucket.folders).then((r) => live && setItems(r), () => live && setItems([]));
+    }, { rootMargin: '900px' });
+    io.observe(el);
+    return () => { live = false; io.disconnect(); };
+  }, [conn, bucket]);
 
-  const dirs = useMemo(() => (items ?? []).filter((i) => i.dir), [items]);
-  const media = useMemo(() => (items ?? []).filter((i) => !i.dir), [items]);
-  const tile = narrow ? 92 : 132;
-
-  if (error) return <div style={{ color: C.dim, fontSize: 14 }}>Could not open this folder. Try again in a moment.</div>;
-  if (!items) return <div style={{ color: C.faint, fontSize: 13 }}>Loading&hellip;</div>;
+  if (items && items.length === 0) return null;
+  const photos = items?.filter((i) => i.cls === 'image').length ?? 0;
+  const videos = items ? items.length - photos : 0;
 
   return (
-    <div>
-      {dirs.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-          {dirs.map((d) => (
-            <button key={d.id} type="button" onClick={() => onEnter({ id: d.id, title: d.title })}
-              style={{
-                font: 'inherit', fontSize: 13, padding: '8px 14px', borderRadius: 999, cursor: 'pointer',
-                border: `1px solid ${C.line}`, background: 'rgba(255,255,255,0.04)', color: C.text,
-              }}>
-              {monthLabel(here.title, d.title)}
-            </button>
-          ))}
-        </div>
-      )}
-      {media.length > 0 && (
+    <section ref={ref} id={anchor} style={{ marginBottom: 26, minHeight: items ? undefined : 180, scrollMarginTop: 70 }}>
+      <div style={{
+        position: 'sticky', top: 0, zIndex: 2, display: 'flex', alignItems: 'baseline', gap: 10,
+        padding: '10px 0 8px', background: 'var(--wt-ground)',
+      }}>
+        <span style={{ fontSize: 18, fontWeight: 300, color: C.text }}>{bucketLabel(bucket.key)}</span>
+        {items && (
+          <span style={{ fontSize: 12, color: C.faint }}>
+            {`${photos} photo${photos === 1 ? '' : 's'}${videos ? ` · ${videos} video${videos === 1 ? '' : 's'}` : ''}`}
+          </span>
+        )}
+      </div>
+      {!items ? (
+        <div style={{ fontSize: 12, color: C.faint }}>Loading&hellip;</div>
+      ) : (
         <>
-          <div style={{ fontSize: 12, color: C.faint, marginBottom: 10 }}>
-            {`${media.filter((m) => m.cls === 'image').length} photos · ${media.filter((m) => m.cls === 'video').length} videos`}
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${tile}px, 1fr))`, gap: 6 }}>
-            {media.slice(0, limit).map((m, i) => (
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${tile}px, 1fr))`, gap: 4 }}>
+            {items.slice(0, limit).map((m, i) => (
               <Tile key={m.id} conn={conn} item={m} size={tile} onOpen={() => setOpen(i)} />
             ))}
           </div>
-          {media.length > limit && (
+          {items.length > limit && (
             <button type="button" onClick={() => setLimit((l) => l + 240)}
               style={{
-                display: 'block', margin: '16px auto 0', font: 'inherit', fontSize: 13, padding: '10px 20px',
+                display: 'block', margin: '12px auto 0', font: 'inherit', fontSize: 13, padding: '9px 18px',
                 borderRadius: 999, cursor: 'pointer', border: `1px solid ${C.line}`, background: 'transparent', color: C.gold,
               }}>
-              {`Show more (${media.length - limit} left)`}
+              {`Show ${Math.min(240, items.length - limit)} more from ${bucketLabel(bucket.key)}`}
             </button>
           )}
         </>
       )}
-      {!dirs.length && !media.length && <div style={{ color: C.dim, fontSize: 14 }}>Nothing in this folder.</div>}
-      {open != null && (
-        <Viewer conn={conn} items={media} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />
+      {open != null && items && (
+        <Viewer conn={conn} items={items} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />
       )}
-    </div>
-  );
-}
-
-/** This calendar month, from every year that has one. */
-function ThisMonth({ conn, years, onEnter }: { conn: Conn; years: Item[]; onEnter: (c: Crumb[]) => void }) {
-  const mm = String(new Date().getMonth() + 1).padStart(2, '0');
-  const [rows, setRows] = useState<Array<{ year: Item; month: Item; picks: Item[] }>>([]);
-  const [open, setOpen] = useState<{ items: Item[]; i: number } | null>(null);
-
-  useEffect(() => {
-    let live = true;
-    (async () => {
-      const found: Array<{ year: Item; month: Item; picks: Item[] }> = [];
-      for (const y of years) {
-        const month = (await browse(conn, y.id).catch(() => [])).find((c) => c.dir && c.title === mm);
-        if (!month) continue;
-        const media = (await browse(conn, month.id).catch(() => [])).filter((c) => !c.dir);
-        if (!media.length) continue;
-        // Spread the picks across the month rather than the first six files.
-        const step = Math.max(1, Math.floor(media.length / 6));
-        found.push({ year: y, month, picks: media.filter((_, i) => i % step === 0).slice(0, 6) });
-        if (live) setRows([...found]);
-      }
-    })();
-    return () => { live = false; };
-  }, [conn, years, mm]);
-
-  if (!rows.length) return null;
-  return (
-    <div style={{ marginBottom: 22 }}>
-      <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.22em', textTransform: 'uppercase', color: C.dim, marginBottom: 10 }}>
-        {`${MONTHS[Number(mm) - 1]} over the years`}
-      </div>
-      <div style={{ display: 'grid', gap: 14 }}>
-        {rows.map((r) => (
-          <div key={r.year.id}>
-            <button type="button"
-              onClick={() => onEnter([{ id: ROOT, title: 'Photos' }, { id: r.year.id, title: r.year.title }, { id: r.month.id, title: r.month.title }])}
-              style={{ font: 'inherit', fontSize: 14, color: C.gold, background: 'none', border: 'none', padding: 0, cursor: 'pointer', marginBottom: 6 }}>
-              {`${r.year.title} ›`}
-            </button>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 5, maxWidth: 720 }}>
-              {r.picks.map((p, i) => <Tile key={p.id} conn={conn} item={p} size={100} onOpen={() => setOpen({ items: r.picks, i })} />)}
-            </div>
-          </div>
-        ))}
-      </div>
-      {open && <Viewer conn={conn} items={open.items} index={open.i} onIndex={(i) => setOpen({ ...open, i })} onClose={() => setOpen(null)} />}
-    </div>
+    </section>
   );
 }
 
 export function PhotosPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const conn = hass.connection;
-  const [crumbs, setCrumbs] = useState<Crumb[]>([{ id: ROOT, title: 'Photos' }]);
-  const [top, setTop] = useState<Item[] | null>(null);
+  const [buckets, setBuckets] = useState<Bucket[] | null>(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
     let live = true;
-    browse(conn, ROOT).then((r) => live && setTop(r), () => live && setError(true));
+    buildIndex(conn).then((b) => live && setBuckets(b), () => live && setError(true));
     return () => { live = false; };
   }, [conn]);
 
-  const years = useMemo(() => (top ?? []).filter((t) => t.dir && isYear(t.title)).sort((a, b) => b.title.localeCompare(a.title)), [top]);
-  const albums = useMemo(() => (top ?? []).filter((t) => t.dir && !isYear(t.title)), [top]);
-  const enter = useCallback((c: Crumb) => setCrumbs((cs) => [...cs, c]), []);
-  const atRoot = crumbs.length === 1;
+  const years = useMemo(() => {
+    const seen: string[] = [];
+    for (const b of buckets ?? []) {
+      const y = b.key.slice(0, 4);
+      if (b.key !== 'undated' && !seen.includes(y)) seen.push(y);
+    }
+    return seen;
+  }, [buckets]);
+
+  const jump = useCallback((y: string) => {
+    document.getElementById(`photos-${y}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
 
   const card: CSSProperties = {
-    background: C.glass, border: `1px solid ${C.line}`, borderRadius: C.radius, padding: narrow ? 16 : 22, minWidth: 0,
+    background: C.glass, border: `1px solid ${C.line}`, borderRadius: C.radius, padding: narrow ? 14 : 22, minWidth: 0,
   };
 
   if (error) {
@@ -381,62 +436,34 @@ export function PhotosPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
     );
   }
 
+  const firstOfYear = new Set<string>();
   return (
     <section style={card}>
-      {/* Breadcrumb */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 16, fontSize: 14 }}>
-        {crumbs.map((c, i) => {
-          const last = i === crumbs.length - 1;
-          const label = i > 0 ? monthLabel(crumbs[i - 1].title, c.title) : c.title;
-          return (
-            <span key={c.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              {i > 0 && <span style={{ color: C.faint }}>&rsaquo;</span>}
-              {last ? (
-                <span style={{ color: C.text, fontSize: i === 0 ? 20 : 16, fontWeight: 300 }}>{label}</span>
-              ) : (
-                <button type="button" onClick={() => setCrumbs(crumbs.slice(0, i + 1))}
-                  style={{ font: 'inherit', fontSize: i === 0 ? 20 : 16, fontWeight: 300, color: C.gold, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
-                  {label}
-                </button>
-              )}
-            </span>
-          );
-        })}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 10 }}>
+        <span style={{ fontSize: 22, fontWeight: 300 }}>Photos</span>
+        <span style={{ fontSize: 12, color: C.faint }}>newest first</span>
       </div>
 
-      {atRoot ? (
-        !top ? <div style={{ color: C.faint, fontSize: 13 }}>Loading&hellip;</div> : (
-          <>
-            <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.22em', textTransform: 'uppercase', color: C.dim, marginBottom: 10 }}>Years</div>
-            <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${narrow ? 72 : 90}px, 1fr))`, gap: 8, marginBottom: 20 }}>
-              {years.map((y) => (
-                <button key={y.id} type="button" onClick={() => enter({ id: y.id, title: y.title })}
-                  style={{
-                    font: 'inherit', fontSize: 16, fontWeight: 300, padding: '12px 0', borderRadius: 10, cursor: 'pointer',
-                    border: `1px solid ${C.line}`, background: 'rgba(255,255,255,0.04)', color: C.text,
-                  }}>{y.title}</button>
-              ))}
-            </div>
-            {albums.length > 0 && (
-              <>
-                <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.22em', textTransform: 'uppercase', color: C.dim, marginBottom: 10 }}>Albums</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 24 }}>
-                  {albums.map((a) => (
-                    <button key={a.id} type="button" onClick={() => enter({ id: a.id, title: a.title })}
-                      style={{
-                        font: 'inherit', fontSize: 13.5, padding: '9px 15px', borderRadius: 999, cursor: 'pointer',
-                        border: `1px solid ${C.line}`, background: 'rgba(255,255,255,0.04)', color: C.text,
-                      }}>{a.title}</button>
-                  ))}
-                </div>
-              </>
-            )}
-            <ThisMonth conn={conn} years={years} onEnter={setCrumbs} />
-          </>
-        )
-      ) : (
-        <Folder conn={conn} crumbs={crumbs} onEnter={enter} narrow={narrow} />
+      {/* Year jump: the feed is long, and "the summer Alex was born" is a year, not a scroll. */}
+      {years.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 18 }}>
+          {years.map((y) => (
+            <button key={y} type="button" onClick={() => jump(y)}
+              style={{
+                font: 'inherit', fontSize: 12.5, padding: '5px 11px', borderRadius: 999, cursor: 'pointer',
+                border: `1px solid ${C.line}`, background: 'rgba(255,255,255,0.04)', color: C.dim,
+              }}>{y}</button>
+          ))}
+        </div>
       )}
+
+      {!buckets ? (
+        <div style={{ fontSize: 13, color: C.faint }}>Gathering the library&hellip;</div>
+      ) : buckets.map((b) => {
+        const y = b.key.slice(0, 4);
+        const anchor = b.key !== 'undated' && !firstOfYear.has(y) ? (firstOfYear.add(y), `photos-${y}`) : undefined;
+        return <MonthSection key={b.key} conn={conn} bucket={b} tile={narrow ? 84 : 118} anchor={anchor} />;
+      })}
     </section>
   );
 }
