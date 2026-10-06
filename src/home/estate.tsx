@@ -1627,6 +1627,7 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
   const asleep = useEntity(hass, 'binary_sensor.house_asleep')?.state === 'on';
   const openUpSays = useSceneSummary(hass, 'openup');
   const lockupSays = useSceneSummary(hass, 'lockup');
+  const halloween = useEntity(hass, 'input_boolean.halloween_mode')?.state === 'on';
 
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
@@ -1654,6 +1655,13 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
             hass={hass} entity="input_boolean.vacation_mode" label="Away" icon={P.home}
             whenOn="lights on a wander" whenOff={undefined}
           />
+          {/* Seasonal: offered in September and October, and for as long as it stays on. */}
+          {(halloween || [8, 9].includes(new Date().getMonth())) && (
+            <ModePill
+              hass={hass} entity="input_boolean.halloween_mode" label="Halloween"
+              whenOn="entry is haunted" whenOff={undefined}
+            />
+          )}
 
           <span style={{ flex: 1 }} />
           {/* Open Up and Lockup are a pair: the first thing pressed in the
@@ -1673,6 +1681,8 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
       </Glass>
 
       <AttentionBoard items={attention.filter((a) => a.scope !== 'grow')} span={cols} />
+
+      {halloween && <HalloweenCard hass={hass} span={cols} />}
 
       <Glass span={narrow ? 1 : 2} style={{ padding: 14 }}>
         <div style={{ padding: '4px 8px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -1820,6 +1830,56 @@ function AlertBlock({ label, note, span, children }: {
       )}
       {children}
     </Glass>
+  );
+}
+
+/* ============================================================= halloween */
+
+/*
+ * The entry on Halloween night - packages/halloween.yaml does the work, this
+ * card only flips its switches. It appears while Halloween mode is on, so it
+ * is in reach on the night and gone the rest of the year.
+ *
+ * Speaker defaults to None on purpose: the "Family Room" Sonos actually sits
+ * in the office, and a test button should never thunder next to a desk.
+ */
+const HALLOWEEN_SPEAKERS = ['None', 'Family Room Sonos', 'Bedroom Sonos'];
+
+function HalloweenCard({ hass, span }: { hass: Hass; span: number }) {
+  const speaker = useEntity(hass, 'input_select.halloween_speaker')?.state ?? 'None';
+  const pick = (option: string) =>
+    void hass.callService('input_select', 'select_option', { option },
+      { entity_id: 'input_select.halloween_speaker' });
+
+  return (
+    <AlertBlock
+      span={span}
+      label="🎃 Halloween"
+      note="The foyer light flickers like lightning whenever the front door opens while Trick-or-treat is on, and the bench diffuser glows. On Oct 31 it runs 5 to 9 pm by itself. Nothing here touches a lock."
+    >
+      <SettingBooleanToggle hass={hass} entity="input_boolean.trick_or_treat"
+        label="Trick-or-treat"
+        hint="Foyer on, bench green, lightning when the door opens. Twenty seconds' rest between scares." />
+      <SettingBooleanToggle hass={hass} entity="input_boolean.halloween_ambient_lightning"
+        label="Ambient lightning"
+        hint="A silent flicker every five minutes or so while Trick-or-treat is on, for the street." />
+      <div style={{ padding: '14px 0', borderBottom: `1px solid ${T.line}` }}>
+        <div style={{ fontSize: 14.5, fontWeight: 500 }}>Thunder plays on</div>
+        <div style={{ fontSize: 11.5, color: T.dim, margin: '2px 0 10px' }}>
+          Only matters if a Sonos is carried to the entry for the night. None means lights only.
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {HALLOWEEN_SPEAKERS.map((s) => (
+            <Pill key={s} active={speaker === s} onClick={() => pick(s)}>{s}</Pill>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, paddingTop: 14 }}>
+        <FirePill hass={hass} script="script.halloween_lightning" label="Test lightning" />
+        <FirePill hass={hass} script="script.halloween_out_of_candy" label="Out of candy" tone="alert"
+          confirm="Turns off Trick-or-treat and the foyer light. Switch the porch light off by hand." />
+      </div>
+    </AlertBlock>
   );
 }
 
