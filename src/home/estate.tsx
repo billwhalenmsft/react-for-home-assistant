@@ -1712,6 +1712,7 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
 
       <LightingSummary hass={hass} onMore={() => go('rooms')} />
       <HueTune hass={hass} />
+      <FrontCans hass={hass} />
       <NowPlaying hass={hass} onMore={() => go('cinema')} />
       <GrowSummary hass={hass} onMore={() => go('grow')} />
 
@@ -2134,6 +2135,178 @@ function HueTune({ hass }: { hass: Hass }) {
       <div style={{ fontSize: 11, color: T.faint, marginTop: 12, lineHeight: 1.55 }}>
         Dimming or picking any of these hands the lights to you and Adaptive Lighting
         steps back, until you send them back to the hour. Range {minK}–{maxK}K.
+      </div>
+    </Glass>
+  );
+}
+
+/*
+ * Front cans - five THIRDREALITY colour BR30s outside, on one plain wall
+ * switch. The switch is power only; colour and brightness live here.
+ *
+ * Unlike the Hue card there is no Adaptive Lighting behind these: outdoor
+ * colour is a choice, not a time of day. The per-can dots are there because
+ * the porch is at the edge of the Zigbee mesh, and a can that has dropped off
+ * should be visible rather than quietly stuck on last week's colour.
+ */
+const FRONT_CANS = 'light.front_cans';
+const FRONT_CAN_IDS = [1, 2, 3, 4, 5].map((n) => `light.front_can_${n}`);
+
+const OUTDOOR_COLORS: ReadonlyArray<{ label: string; hs: [number, number] }> = [
+  { label: 'Orange', hs: [24, 100] },
+  { label: 'Red',    hs: [0, 100] },
+  { label: 'Purple', hs: [275, 100] },
+  { label: 'Green',  hs: [115, 95] },
+  { label: 'Blue',   hs: [222, 100] },
+  { label: 'Pink',   hs: [325, 80] },
+];
+
+const rgbCss = (e: HassEntity | undefined): string | null => {
+  const c = attr(e, 'rgb_color') as number[] | undefined;
+  return e?.state === 'on' && c ? `rgb(${c[0]}, ${c[1]}, ${c[2]})` : null;
+};
+
+function FrontCans({ hass }: { hass: Hass }) {
+  const ids = useMemo(() => [FRONT_CANS, ...FRONT_CAN_IDS, 'input_boolean.halloween_mode'], []);
+  const e = useEntities(hass, ids);
+  const light = e[FRONT_CANS];
+
+  const briAttr = attr(light, 'brightness');
+  const litPct = typeof briAttr === 'number' ? Math.round((briAttr / 255) * 100) : 0;
+  const [briDraft, setBriDraft] = useState<number | null>(null);
+  const briTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(briTimer.current), []);
+  useEffect(() => {
+    if (briDraft == null) return undefined;
+    if (Math.abs(litPct - briDraft) <= 2) { setBriDraft(null); return undefined; }
+    const t = window.setTimeout(() => setBriDraft(null), 5000);
+    return () => window.clearTimeout(t);
+  }, [litPct, briDraft]);
+  const shownBri = briDraft ?? litPct;
+
+  const send = (data: Record<string, unknown>) =>
+    void hass.callService('light', 'turn_on', data, { entity_id: FRONT_CANS });
+
+  const setBrightness = (v: number) => {
+    setBriDraft(v);
+    window.clearTimeout(briTimer.current);
+    // Five bulbs at the edge of the mesh: one command when the finger
+    // settles, not a stream of them while it moves.
+    briTimer.current = window.setTimeout(() => send({ brightness_pct: Math.max(1, Math.round(v)) }), 250);
+  };
+
+  const cans = FRONT_CAN_IDS.map((id) => e[id]);
+  const reachable = cans.filter((c) => c && c.state !== 'unavailable').length;
+  const noPower = reachable === 0;
+  const on = light?.state === 'on';
+  const glow = rgbCss(light) ?? 'rgba(255,255,255,0.05)';
+  const litK = attrNum(light, 'color_temp_kelvin', 0);
+  const mode = attr(light, 'color_mode');
+  const haunted = e['input_boolean.halloween_mode']?.state === 'on';
+
+  const status = noPower ? 'No power' : !on ? 'Off' : reachable < 5 ? `${reachable} of 5` : 'On';
+  const statusTone = noPower ? T.alert : !on ? T.faint : reachable < 5 ? T.gold : T.ok;
+
+  return (
+    <Glass>
+      <PanelHead
+        label="Front cans"
+        right={<span style={{ fontSize: 11.5, color: statusTone, letterSpacing: '.04em' }}>{status}</span>}
+      />
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
+        <button
+          type="button" className="est-lift est-tap" disabled={noPower}
+          aria-label={on ? 'Turn the front cans off' : 'Turn the front cans on'}
+          onClick={() => void hass.callService('light', on ? 'turn_off' : 'turn_on', {}, { entity_id: FRONT_CANS })}
+          style={{
+            width: 58, height: 58, borderRadius: 20, display: 'grid', placeItems: 'center',
+            cursor: noPower ? 'default' : 'pointer',
+            border: `1px solid ${on ? T.goldDeep : T.line}`,
+            background: on ? glow : 'rgba(255,255,255,0.05)',
+            color: on ? '#1a1408' : T.dim,
+            boxShadow: on ? `0 6px 26px ${glow}` : 'none',
+          }}
+        >
+          <Icon d={P.bulb} size={26} />
+        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {/* One dot per can, in its live colour. A dashed ring is a can HA cannot reach. */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+            {cans.map((c, i) => {
+              const gone = !c || c.state === 'unavailable';
+              return (
+                <button
+                  key={FRONT_CAN_IDS[i]} type="button" disabled={gone}
+                  title={`Can ${i + 1}${gone ? ' - not reachable' : ''}`}
+                  aria-label={`Can ${i + 1}, ${gone ? 'not reachable' : c.state}. Tap to toggle.`}
+                  onClick={() => void hass.callService('light', 'toggle', {}, { entity_id: FRONT_CAN_IDS[i] })}
+                  style={{
+                    width: 20, height: 20, borderRadius: 999, padding: 0, cursor: gone ? 'default' : 'pointer',
+                    border: gone ? `1px dashed ${T.faint}` : `1px solid ${T.line}`,
+                    background: rgbCss(c) ?? 'transparent',
+                  }}
+                />
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 12, color: T.dim }}>
+            {noPower
+              ? 'The porch switch is off. Flip it on - it stays on, HA does the rest.'
+              : haunted ? 'Halloween mode is setting these. Pick anything to override.'
+                : 'Tap a dot to switch one can on its own.'}
+          </div>
+        </div>
+      </div>
+
+      {on && (
+        <>
+          <span style={{ ...LABEL, display: 'block', marginBottom: 6 }}>Brightness</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <GoldSlider value={shownBri} ariaLabel="Front cans brightness" onChange={setBrightness} />
+            </div>
+            <span style={{ fontSize: 13, color: T.dim, width: 38, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+              {`${Math.round(shownBri)}%`}
+            </span>
+          </div>
+        </>
+      )}
+
+      <span style={{ ...LABEL, display: 'block', marginBottom: 8 }}>White</span>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+        {KELVIN_PRESETS.map((k) => (
+          <button
+            key={k.k} type="button" className="est-lift est-tap" disabled={noPower}
+            title={`${k.label} · ${k.k}K`} aria-label={`${k.label}, ${k.k} kelvin`}
+            onClick={() => send({ color_temp_kelvin: k.k })}
+            style={{
+              flex: 1, minWidth: 54, height: 38, borderRadius: 9, cursor: 'pointer',
+              border: `1px solid ${on && mode === 'color_temp' && Math.abs(litK - k.k) < 60 ? T.gold : T.line}`,
+              background: k.css, color: '#2a2118', font: 'inherit', fontSize: 10.5, letterSpacing: '.03em',
+            }}
+          >
+            {k.label}
+          </button>
+        ))}
+      </div>
+
+      <span style={{ ...LABEL, display: 'block', marginBottom: 8 }}>Colour</span>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {OUTDOOR_COLORS.map((c) => (
+          <button
+            key={c.label} type="button" className="est-lift est-tap" disabled={noPower}
+            title={c.label} aria-label={c.label}
+            onClick={() => send({ hs_color: c.hs })}
+            style={{
+              flex: 1, minWidth: 54, height: 38, borderRadius: 9, cursor: 'pointer',
+              border: `1px solid ${T.line}`, font: 'inherit', fontSize: 10.5, letterSpacing: '.03em',
+              background: `hsl(${c.hs[0]}, ${c.hs[1]}%, 55%)`, color: '#14110d',
+            }}
+          >
+            {c.label}
+          </button>
+        ))}
       </div>
     </Glass>
   );
