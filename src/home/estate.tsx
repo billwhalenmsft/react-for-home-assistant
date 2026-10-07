@@ -100,6 +100,7 @@ const P = {
   cog: 'M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z',
   printer: 'M19 8h-1V3H6v5H5a3 3 0 00-3 3v6h4v4h12v-4h4v-6a3 3 0 00-3-3M8 5h8v3H8V5m8 15H8v-5h8v5m3-7a1 1 0 11-1-1 1 1 0 011 1Z',
   photo: 'M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z',
+  ghost: 'M12 2a8 8 0 0 0-8 8v12l2.67-2 2.66 2L12 20l2.67 2 2.66-2L20 22V10a8 8 0 0 0-8-8zM9 9a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm6 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z',
   heart: 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z',
   // Thermostat modes. Material's whatshot / ac_unit / swap_vert, and MDI's fan.
   flame: 'M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-.36 3.6-1.21 4.62-2.58.39 1.29.59 2.65.59 4.04 0 2.65-2.15 4.8-4.8 4.8z',
@@ -308,7 +309,7 @@ const SCENES: ReadonlyArray<Scene> = HOUSE.scenes;
 
 /* ================================================================ shell */
 
-type Page = 'home' | 'rooms' | 'people' | 'us' | 'photos' | 'profile' | 'cinema' | 'security' | 'grow' | 'sky' | 'printers' | 'guitar' | 'settings';
+type Page = 'home' | 'rooms' | 'people' | 'us' | 'photos' | 'halloween' | 'profile' | 'cinema' | 'security' | 'grow' | 'sky' | 'printers' | 'guitar' | 'settings';
 
 /**
  * `optional` pages are OFF for everybody until a user turns them on in Setup.
@@ -317,7 +318,7 @@ type Page = 'home' | 'rooms' | 'people' | 'us' | 'photos' | 'profile' | 'cinema'
  * rest of the house. Different from `adminOnly`, which is a role check the
  * user cannot alter.
  */
-type NavItem = { id: Page; label: string; icon: string; adminOnly?: boolean; optional?: boolean; couple?: boolean };
+type NavItem = { id: Page; label: string; icon: string; adminOnly?: boolean; optional?: boolean; couple?: boolean; seasonal?: boolean };
 
 /**
  * `adminOnly` keeps house-wide dials off non-admin phones entirely, rather
@@ -341,6 +342,8 @@ const NAV: ReadonlyArray<NavItem> = [
   // shown as a tab that leads nowhere, same as adminOnly.
   { id: 'us', label: 'Us', icon: P.heart, couple: true },
   { id: 'photos', label: 'Photos', icon: P.photo },
+  // Seasonal: in the nav from September to the first week of November only.
+  { id: 'halloween', label: 'Halloween', icon: P.ghost, seasonal: true },
   { id: 'cinema', label: 'Cinema', icon: P.cinema },
   { id: 'sky', label: 'Sky', icon: P.sky },
   { id: 'profile', label: 'Profile', icon: P.person },
@@ -376,6 +379,7 @@ const PAGE_HINT: Record<string, string> = {
   guitar: 'A 52-song syllabus, two a week, with tab links.',
   us: 'Just for Bill and Erin: how you are each doing, and what would help.',
   photos: 'Home photos and videos from the NAS, by year and month.',
+  halloween: 'Sound board, light show and trick-or-treat night. Shows September to early November.',
 };
 
 /** Default: everything on except the optional pages, in the order NAV declares. */
@@ -389,6 +393,7 @@ function visibleNav(admin: boolean, prefs: NavPrefs, couple = false) {
   return NAV
     .filter((n) => admin || !n.adminOnly)
     .filter((n) => couple || !n.couple)
+    .filter((n) => !n.seasonal || inHalloweenSeason())
     .filter((n) => LOCKED_VISIBLE.has(n.id) || !prefs.hidden.includes(n.id))
     .sort((a, b) => (rank.get(a.id) ?? 99) - (rank.get(b.id) ?? 99));
 }
@@ -399,6 +404,7 @@ function orderedNav(admin: boolean, prefs: NavPrefs, couple = false) {
   return NAV
     .filter((n) => admin || !n.adminOnly)
     .filter((n) => couple || !n.couple)
+    .filter((n) => !n.seasonal || inHalloweenSeason())
     .sort((a, b) => (rank.get(a.id) ?? 99) - (rank.get(b.id) ?? 99));
 }
 
@@ -498,6 +504,7 @@ export function EstateApp({ hass }: { hass: Hass }) {
           {page === 'rooms' && <RoomsPage hass={hass} narrow={narrow} />}
           {page === 'people' && <PeoplePage hass={hass} narrow={narrow} />}
           {page === 'photos' && <PhotosPage hass={hass} narrow={narrow} />}
+          {page === 'halloween' && <HalloweenPage hass={hass} narrow={narrow} />}
           {page === 'us' && (loveMe
             ? <UsPage hass={hass} narrow={narrow} me={loveMe} />
             : <HomePage hass={hass} narrow={narrow} go={setPage} />)}
@@ -1655,8 +1662,8 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
             hass={hass} entity="input_boolean.vacation_mode" label="Away" icon={P.home}
             whenOn="lights on a wander" whenOff={undefined}
           />
-          {/* Seasonal: offered in September and October, and for as long as it stays on. */}
-          {(halloween || [8, 9].includes(new Date().getMonth())) && (
+          {/* Seasonal: offered while the Halloween page is in the nav, and for as long as it stays on. */}
+          {(halloween || inHalloweenSeason()) && (
             <ModePill
               hass={hass} entity="input_boolean.halloween_mode" label="Halloween"
               whenOn="entry is haunted" whenOff={undefined}
@@ -1682,7 +1689,6 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
 
       <AttentionBoard items={attention.filter((a) => a.scope !== 'grow')} span={cols} />
 
-      {halloween && <HalloweenCard hass={hass} span={cols} />}
 
       <Glass span={narrow ? 1 : 2} style={{ padding: 14 }}>
         <div style={{ padding: '4px 8px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -1858,6 +1864,9 @@ function HalloweenCard({ hass, span }: { hass: Hass; span: number }) {
       label="🎃 Halloween"
       note="The foyer light flickers like lightning whenever the front door opens while Trick-or-treat is on, and the bench diffuser glows. On Oct 31 it runs 5 to 9 pm by itself. Nothing here touches a lock."
     >
+      <SettingBooleanToggle hass={hass} entity="input_boolean.halloween_mode"
+        label="Halloween mode"
+        hint="Bench diffuser purple, front cans orange. Off puts everything back." />
       <SettingBooleanToggle hass={hass} entity="input_boolean.trick_or_treat"
         label="Trick-or-treat"
         hint="Foyer on, bench green, lightning when the door opens. Twenty seconds' rest between scares." />
@@ -1865,7 +1874,7 @@ function HalloweenCard({ hass, span }: { hass: Hass; span: number }) {
         label="Ambient lightning"
         hint="A silent flicker every five minutes or so while Trick-or-treat is on, for the street." />
       <div style={{ padding: '14px 0', borderBottom: `1px solid ${T.line}` }}>
-        <div style={{ fontSize: 14.5, fontWeight: 500 }}>Thunder plays on</div>
+        <div style={{ fontSize: 14.5, fontWeight: 500 }}>Door thunder plays on</div>
         <div style={{ fontSize: 11.5, color: T.dim, margin: '2px 0 10px' }}>
           Only matters if a Sonos is carried to the entry for the night. None means lights only.
         </div>
@@ -1881,6 +1890,296 @@ function HalloweenCard({ hass, span }: { hass: Hass; span: number }) {
           confirm="Turns off Trick-or-treat and the foyer light. Switch the porch light off by hand." />
       </div>
     </AlertBlock>
+  );
+}
+
+/*
+ * The Halloween page: the switches above, a sound board, and a light show for
+ * the front cans. Everything that runs on its own lives in
+ * packages/halloween.yaml; this page only picks things.
+ *
+ * Sounds are whatever sits in HA's local media named halloween_*, so a new one
+ * dropped in through Media appears here with no code change.
+ *
+ * "This device" plays in the browser you are holding, and it is the default.
+ * The "Family Room" Sonos actually lives in the office, so a sound only goes
+ * to a Sonos after someone deliberately picks it.
+ */
+const SOUND_EMOJI: Record<string, string> = {
+  thunder: '⛈️', creaky_door: '🚪', heartbeat: '💓', wolf_howl: '🐺', ghost_moan: '👻',
+  chains: '⛓️', church_bell: '🔔', owl: '🦉', organ: '🎹', wind: '🌬️', cackle: '🧙',
+  theremin: '🛸', door_slam: '💥', zombie_groan: '🧟',
+};
+const EFFECT_EMOJI: Record<string, string> = {
+  None: '⏹️', Flicker: '🔥', Pulse: '💓', 'Spooky fade': '🧪', Strobe: '⚡',
+  Chase: '🎃', Ghost: '👻', Storm: '⛈️',
+};
+const EFFECT_SWATCH: Record<string, string> = {
+  Orange: '#ff6a00', Purple: '#8200ff', Green: '#28ff1e', Red: '#ff1a1a', White: '#f4f1ea',
+};
+const SOUND_SPEAKERS: ReadonlyArray<{ id: string; label: string; note?: string }> = [
+  { id: 'here', label: 'This device' },
+  { id: 'media_player.family_room_family_room', label: 'Family Room Sonos', note: 'This one sits in the office.' },
+  { id: 'media_player.bedroom_bedroom', label: 'Bedroom Sonos' },
+];
+
+type Sound = { id: string; key: string; label: string };
+
+const inHalloweenSeason = () => {
+  const d = new Date();
+  return d.getMonth() === 8 || d.getMonth() === 9 || (d.getMonth() === 10 && d.getDate() <= 7);
+};
+
+function useHalloweenSounds(hass: Hass): Sound[] | null {
+  const conn = hass.connection;
+  const [sounds, setSounds] = useState<Sound[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    conn.sendMessagePromise<{ children?: Array<{ media_content_id: string; can_expand?: boolean }> }>(
+      { type: 'media_source/browse_media', media_content_id: 'media-source://media_source/local/.' },
+    ).then((r) => {
+      const found = (r.children ?? [])
+        .filter((c) => !c.can_expand)
+        .map((c) => {
+          const m = /\/halloween_([^/]+)\.(wav|mp3|ogg|m4a|aac|flac)$/i.exec(c.media_content_id);
+          if (!m) return null;
+          const key = m[1].toLowerCase();
+          const label = key.replace(/[_-]+/g, ' ').replace(/^\w/, (x) => x.toUpperCase());
+          return { id: c.media_content_id, key, label };
+        })
+        .filter((s): s is Sound => s !== null)
+        .sort((a, b) => a.label.localeCompare(b.label));
+      if (live) setSounds(found);
+    }, () => live && setSounds([]));
+    return () => { live = false; };
+  }, [conn]);
+  return sounds;
+}
+
+function SoundBoard({ hass, span }: { hass: Hass; span: number }) {
+  const sounds = useHalloweenSounds(hass);
+  const [target, setTarget] = useState<string>(() => {
+    try { return window.localStorage.getItem('estate.halloween.speaker') ?? 'here'; } catch { return 'here'; }
+  });
+  const pickTarget = (id: string) => {
+    setTarget(id);
+    try { window.localStorage.setItem('estate.halloween.speaker', id); } catch { /* private window */ }
+  };
+  const [playing, setPlaying] = useState<string | null>(null);
+  const audio = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => () => { audio.current?.pause(); }, []);
+
+  // Volume lives in HA so the door thunder and the board agree. The draft
+  // keeps the thumb under the finger until HA echoes the value back.
+  const volEnt = useEntity(hass, 'input_number.halloween_volume');
+  const volHa = Number(volEnt?.state ?? 50);
+  const [volDraft, setVolDraft] = useState<number | null>(null);
+  const volTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(volTimer.current), []);
+  useEffect(() => { if (volDraft != null && Math.abs(volDraft - volHa) < 3) setVolDraft(null); }, [volHa, volDraft]);
+  const vol = volDraft ?? (Number.isFinite(volHa) ? volHa : 50);
+  const setVol = (v: number) => {
+    const snapped = Math.max(5, Math.round(v / 5) * 5);
+    setVolDraft(snapped);
+    if (audio.current) audio.current.volume = snapped / 100;
+    window.clearTimeout(volTimer.current);
+    volTimer.current = window.setTimeout(() => void hass.callService('input_number', 'set_value',
+      { value: snapped }, { entity_id: 'input_number.halloween_volume' }), 250);
+  };
+
+  const speaker = useEntity(hass, target === 'here' ? 'sun.sun' : target);
+  const speakerDown = target !== 'here' && (!speaker || speaker.state === 'unavailable');
+
+  const play = async (s: Sound) => {
+    setPlaying(s.key);
+    window.setTimeout(() => setPlaying((p) => (p === s.key ? null : p)), 1600);
+    if (target === 'here') {
+      try {
+        const r = await hass.connection.sendMessagePromise<{ url: string }>(
+          { type: 'media_source/resolve_media', media_content_id: s.id, expires: 3600 });
+        audio.current?.pause();
+        const a = new Audio(r.url.startsWith('http') ? r.url : `${window.location.origin}${r.url}`);
+        a.volume = vol / 100;
+        audio.current = a;
+        await a.play();
+      } catch { /* autoplay blocked or media gone - nothing useful to say mid-scare */ }
+      return;
+    }
+    void hass.callService('script', 'halloween_play_sound', { media: s.id, speaker: target });
+  };
+
+  const stop = () => {
+    audio.current?.pause();
+    if (target !== 'here') void hass.callService('media_player', 'media_stop', {}, { entity_id: target });
+  };
+
+  const note = SOUND_SPEAKERS.find((x) => x.id === target)?.note;
+
+  return (
+    <Glass span={span}>
+      <PanelHead label="🔊 Sound board" right={
+        <button type="button" onClick={stop} className="est-tap"
+          style={{
+            font: 'inherit', fontSize: 12, padding: '5px 12px', borderRadius: 999, cursor: 'pointer',
+            border: `1px solid ${T.line}`, background: 'transparent', color: T.dim,
+          }}>Stop</button>
+      } />
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+        {SOUND_SPEAKERS.map((s) => (
+          <Pill key={s.id} active={target === s.id} onClick={() => pickTarget(s.id)}>{s.label}</Pill>
+        ))}
+      </div>
+      <div style={{ fontSize: 11.5, color: speakerDown ? T.alert : T.faint, marginBottom: 12, minHeight: 16 }}>
+        {speakerDown ? 'That speaker is offline right now.'
+          : target === 'here' ? 'Plays on the phone or tablet in your hand - leave one by the door as a speaker.'
+            : note ?? ''}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+        <span style={{ ...LABEL, width: 58 }}>Volume</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <GoldSlider value={vol} ariaLabel="Halloween volume" onChange={setVol} />
+        </div>
+        <span style={{ fontSize: 13, color: T.dim, width: 38, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+          {`${Math.round(vol)}%`}
+        </span>
+      </div>
+
+      {!sounds ? (
+        <div style={{ fontSize: 12.5, color: T.faint }}>Finding the sounds&hellip;</div>
+      ) : sounds.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: T.dim }}>
+          No sounds yet. Upload audio files named <code>halloween_something.mp3</code> in HA &rarr; Media &rarr; My media.
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 8 }}>
+          {sounds.map((s) => (
+            <button
+              key={s.id} type="button" className="est-lift est-tap" onClick={() => void play(s)}
+              disabled={speakerDown}
+              style={{
+                aspectRatio: '1 / 1', borderRadius: 14, cursor: speakerDown ? 'default' : 'pointer',
+                display: 'grid', placeItems: 'center', alignContent: 'center', gap: 6, padding: 6,
+                font: 'inherit', fontSize: 12, color: playing === s.key ? '#191408' : T.text,
+                border: `1px solid ${playing === s.key ? T.goldDeep : T.line}`,
+                background: playing === s.key
+                  ? `linear-gradient(180deg, ${T.gold}, ${T.goldDeep})`
+                  : 'rgba(255,255,255,0.04)',
+                transition: 'background .2s',
+              }}
+            >
+              <span style={{ fontSize: 30, lineHeight: 1 }}>{SOUND_EMOJI[s.key] ?? '🔊'}</span>
+              <span>{s.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div style={{ fontSize: 11, color: T.faint, marginTop: 12, lineHeight: 1.55 }}>
+        Add your own: any file named <code>halloween_&hellip;</code> in HA &rarr; Media &rarr; My media shows up here.
+      </div>
+    </Glass>
+  );
+}
+
+function LightShow({ hass }: { hass: Hass }) {
+  const ids = useMemo(() => [
+    'input_select.halloween_effect', 'input_select.halloween_effect_color', 'input_number.halloween_effect_speed',
+  ], []);
+  const e = useEntities(hass, ids);
+  const fxEnt = e['input_select.halloween_effect'];
+  const colorEnt = e['input_select.halloween_effect_color'];
+  const effects = (attr(fxEnt, 'options') as string[] | undefined) ?? [];
+  const colors = (attr(colorEnt, 'options') as string[] | undefined) ?? [];
+  const fx = fxEnt?.state ?? 'None';
+  const color = colorEnt?.state ?? 'Orange';
+
+  const speedHa = Number(e['input_number.halloween_effect_speed']?.state ?? 5);
+  const [speedDraft, setSpeedDraft] = useState<number | null>(null);
+  const speedTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(speedTimer.current), []);
+  useEffect(() => { if (speedDraft != null && speedDraft === speedHa) setSpeedDraft(null); }, [speedHa, speedDraft]);
+  const speed = speedDraft ?? (Number.isFinite(speedHa) ? speedHa : 5);
+  const setSpeed = (pct: number) => {
+    const s = 1 + Math.round((pct / 100) * 9);
+    setSpeedDraft(s);
+    window.clearTimeout(speedTimer.current);
+    speedTimer.current = window.setTimeout(() => void hass.callService('input_number', 'set_value',
+      { value: s }, { entity_id: 'input_number.halloween_effect_speed' }), 200);
+  };
+
+  const pick = (entity: string, option: string) =>
+    void hass.callService('input_select', 'select_option', { option }, { entity_id: entity });
+
+  return (
+    <Glass>
+      <PanelHead label="✨ Light show" right={
+        <span style={{ fontSize: 11.5, color: fx === 'None' ? T.faint : T.ok, letterSpacing: '.04em' }}>
+          {fx === 'None' ? 'Still' : fx}
+        </span>
+      } />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, marginBottom: 16 }}>
+        {effects.map((o) => (
+          <button
+            key={o} type="button" className="est-lift est-tap" onClick={() => pick('input_select.halloween_effect', o)}
+            style={{
+              padding: '10px 4px', borderRadius: 12, cursor: 'pointer', display: 'grid', placeItems: 'center', gap: 4,
+              font: 'inherit', fontSize: 11.5, color: fx === o ? '#191408' : T.text,
+              border: `1px solid ${fx === o ? T.goldDeep : T.line}`,
+              background: fx === o ? `linear-gradient(180deg, ${T.gold}, ${T.goldDeep})` : 'rgba(255,255,255,0.04)',
+            }}
+          >
+            <span style={{ fontSize: 22, lineHeight: 1 }}>{EFFECT_EMOJI[o] ?? '✨'}</span>
+            <span>{o === 'None' ? 'Stop' : o}</span>
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+        <span style={{ ...LABEL, width: 58 }}>Speed</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <GoldSlider value={((speed - 1) / 9) * 100} ariaLabel="Effect speed" onChange={setSpeed} />
+        </div>
+        <span style={{ fontSize: 13, color: T.dim, width: 38, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+          {speed}
+        </span>
+      </div>
+
+      <span style={{ ...LABEL, display: 'block', marginBottom: 8 }}>Colour for Pulse and Strobe</span>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {colors.map((c) => (
+          <button
+            key={c} type="button" className="est-lift est-tap" aria-label={c} title={c}
+            onClick={() => pick('input_select.halloween_effect_color', c)}
+            style={{
+              flex: 1, minWidth: 46, height: 34, borderRadius: 9, cursor: 'pointer',
+              border: `2px solid ${color === c ? T.gold : 'transparent'}`,
+              background: EFFECT_SWATCH[c] ?? '#888', font: 'inherit', fontSize: 10.5, color: '#14110d',
+            }}
+          >
+            {c}
+          </button>
+        ))}
+      </div>
+      <div style={{ fontSize: 11, color: T.faint, marginTop: 12, lineHeight: 1.55 }}>
+        Stop puts the cans back how they were. Strobe tops out at 2.5 flashes a second on purpose, for the
+        photosensitive kids in the crowd. Storm also blinks the foyer and plays the door thunder.
+      </div>
+    </Glass>
+  );
+}
+
+function HalloweenPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
+  const cols = narrow ? 1 : 3;
+  return (
+    <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+      <SoundBoard hass={hass} span={narrow ? 1 : 2} />
+      <div style={{ display: 'grid', gap: 18, alignContent: 'start' }}>
+        <LightShow hass={hass} />
+      </div>
+      <HalloweenCard hass={hass} span={narrow ? 1 : 2} />
+      <FrontCans hass={hass} />
+    </div>
   );
 }
 
