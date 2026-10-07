@@ -1689,13 +1689,13 @@ function HomePage({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (p: P
 
       <AttentionBoard items={attention.filter((a) => a.scope !== 'grow')} span={cols} />
 
-
       <Glass span={narrow ? 1 : 2} style={{ padding: 14 }}>
         <div style={{ padding: '4px 8px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
           <div style={LABEL}>The Estate — live</div>
           <MoreLink onClick={() => go('rooms')} />
         </div>
         <Floorplan hass={hass} />
+        <OutsideStrip hass={hass} />
       </Glass>
 
       {/* The column beside the floorplan. The floorplan is by far the tallest
@@ -2611,6 +2611,169 @@ function FrontCans({ hass }: { hass: Hass }) {
   );
 }
 
+/*
+ * Outdoors. The Rooms grid is built from the traced floorplan, and nothing
+ * outside the walls is on it - so the porch lights, the outdoor cameras and
+ * the sprinklers had no room to live in. This is that room.
+ *
+ * camera.unknown ("Outdoor 3") is left off on purpose, same as the Security
+ * wall: Bill asked for it to stay hidden.
+ */
+const OUTDOOR_CAMS: ReadonlyArray<{ name: string; cam: string; motion?: string }> = [
+  { name: 'Front Door', cam: 'camera.front_door', motion: 'binary_sensor.front_door_motion' },
+  { name: 'Front Porch', cam: 'camera.front_porch', motion: 'binary_sensor.front_porch_motion' },
+  { name: 'Wyoming Ave', cam: 'camera.wyoming_ave', motion: 'binary_sensor.wyoming_ave_motion' },
+  { name: 'Backyard', cam: 'camera.vicohome_williamjaywhalen81_gmail_com_camera', motion: 'binary_sensor.birdsnap_motion' },
+];
+const RACHIO = 'switch.whalen_rachio_c3c4b5';
+const RACHIO_ZONES = [
+  'zone_1_front_yard', 'zone_2_side_yard_by_fischers', 'zone_3_back_yard_left_side', 'zone_4_back_yard_rt_back',
+  'zone_5_back_yard_right_front', 'zone_6_side_yard_a_c_unit', 'zone_7_side_yard_by_driveway',
+].map((z) => `${RACHIO}_${z}`);
+
+const zoneLabel = (id: string) =>
+  id.replace(`${RACHIO}_zone_`, '').replace(/^\d+_/, '').replace(/_/g, ' ')
+    .replace(/\ba c\b/, 'A/C').replace(/\brt\b/, 'right').replace(/^\w/, (c) => c.toUpperCase());
+
+const sinceText = (iso: string | undefined, now: number) => {
+  if (!iso) return '';
+  const m = Math.round((now - Date.parse(iso)) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
+};
+
+function OutdoorCams({ hass, narrow }: { hass: Hass; narrow: boolean }) {
+  const ids = useMemo(() => OUTDOOR_CAMS.flatMap((c) => (c.motion ? [c.cam, c.motion] : [c.cam])), []);
+  const e = useEntities(hass, ids);
+  const now = useNow(30000);
+  return (
+    <Glass span={narrow ? 1 : 2}>
+      <PanelHead label="Outdoor cameras" right={<MoreLink onClick={() => { window.location.hash = '#security'; }} />} />
+      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: `repeat(${narrow ? 1 : 2}, minmax(0,1fr))` }}>
+        {OUTDOOR_CAMS.map((c) => {
+          const pic = attr(e[c.cam], 'entity_picture') as string | undefined;
+          const mo = c.motion ? e[c.motion] : undefined;
+          const moving = mo?.state === 'on';
+          return (
+            <button
+              key={c.cam} type="button" className="est-lift est-tap"
+              onClick={() => { window.location.hash = '#security'; }}
+              aria-label={`${c.name} camera - open Security`}
+              style={{
+                padding: 0, borderRadius: 14, overflow: 'hidden', cursor: 'pointer', font: 'inherit', textAlign: 'left',
+                border: `1px solid ${moving ? T.warn : T.line}`, background: 'rgba(0,0,0,0.4)', color: T.text,
+              }}
+            >
+              {pic ? (
+                <img src={pic} alt="" loading="lazy"
+                  style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block', background: '#000' }} />
+              ) : (
+                <div style={{ aspectRatio: '16/9', display: 'grid', placeItems: 'center', color: T.faint, fontSize: 12 }}>
+                  No picture yet
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '8px 11px 9px', fontSize: 12 }}>
+                <span>{c.name}</span>
+                <span style={{ color: moving ? T.warn : T.dim }}>
+                  {moving ? 'Motion now' : mo ? `motion ${sinceText(mo.last_changed, now.getTime())}` : ''}
+                </span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </Glass>
+  );
+}
+
+function SprinklerStatus({ hass }: { hass: Hass }) {
+  const ids = useMemo(() => [...RACHIO_ZONES, `${RACHIO}_standby`, `${RACHIO}_rain_delay`, 'binary_sensor.yard_raining'], []);
+  const e = useEntities(hass, ids);
+  const running = RACHIO_ZONES.filter((z) => e[z]?.state === 'on');
+  const standby = e[`${RACHIO}_standby`]?.state === 'on';
+  const delay = e[`${RACHIO}_rain_delay`]?.state === 'on';
+  const raining = e['binary_sensor.yard_raining']?.state === 'on';
+  const headline = running.length ? `Watering ${zoneLabel(running[0]).toLowerCase()}`
+    : standby ? 'Controller on standby' : delay ? 'Rain delay on' : 'Not watering';
+  return (
+    <Glass>
+      <PanelHead label="Sprinklers" right={<MoreLink onClick={() => { window.location.hash = '#sky/yard'; }} />} />
+      <div style={{ fontSize: 17, fontWeight: 400, color: running.length ? T.ok : T.text }}>{headline}</div>
+      <div style={{ fontSize: 12, color: T.dim, marginTop: 3, marginBottom: 12 }}>
+        {raining ? 'It is raining in the yard right now.' : 'Schedules and watering history live on Yard & watering.'}
+      </div>
+      <div style={{ display: 'grid', gap: 6 }}>
+        {RACHIO_ZONES.map((z, i) => {
+          const on = e[z]?.state === 'on';
+          return (
+            <div key={z} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+              <span style={{ color: on ? T.ok : T.dim }}>{`${i + 1} · ${zoneLabel(z)}`}</span>
+              <span style={{ color: on ? T.ok : T.faint }}>{on ? 'running' : e[z] ? 'idle' : '—'}</span>
+            </div>
+          );
+        })}
+      </div>
+    </Glass>
+  );
+}
+
+function OutdoorSection({ hass, narrow }: { hass: Hass; narrow: boolean }) {
+  const cols = narrow ? 1 : 3;
+  return (
+    <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+      <FrontCans hass={hass} />
+      <OutdoorCams hass={hass} narrow={narrow} />
+      <SprinklerStatus hass={hass} />
+    </div>
+  );
+}
+
+/*
+ * A thin "outside" line under the floorplan: the plan stops at the walls, and
+ * the porch lights, the street camera and the sprinklers are part of the house
+ * too. One tap on the bulb works the cans; the rest opens the Outdoor tab.
+ */
+function OutsideStrip({ hass }: { hass: Hass }) {
+  const ids = useMemo(() => [FRONT_CANS, ...RACHIO_ZONES, ...OUTDOOR_CAMS.flatMap((c) => (c.motion ? [c.motion] : []))], []);
+  const e = useEntities(hass, ids);
+  const cans = e[FRONT_CANS];
+  const canGlow = rgbCss(cans);
+  const canDead = !cans || cans.state === 'unavailable';
+  const watering = RACHIO_ZONES.some((z) => e[z]?.state === 'on');
+  const motion = OUTDOOR_CAMS.filter((c) => c.motion && e[c.motion]?.state === 'on').map((c) => c.name);
+  const chip: CSSProperties = {
+    display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 11px', borderRadius: 999,
+    border: `1px solid ${T.line}`, background: 'rgba(255,255,255,0.04)', color: T.dim,
+    font: 'inherit', fontSize: 12, cursor: 'pointer',
+  };
+  const openOutdoor = () => { window.location.hash = '#rooms/outdoor'; };
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', padding: '12px 8px 2px' }}>
+      <span style={{ ...LABEL, marginRight: 4 }}>Outside</span>
+      <button type="button" className="est-tap" disabled={canDead}
+        onClick={() => void hass.callService('light', 'toggle', {}, { entity_id: FRONT_CANS })}
+        style={chip}>
+        <span style={{
+          width: 10, height: 10, borderRadius: 999, background: canGlow ?? 'transparent',
+          border: canGlow ? 'none' : `1px solid ${T.faint}`, boxShadow: canGlow ? `0 0 8px ${canGlow}` : 'none',
+        }} />
+        {canDead ? 'Front cans · no power' : `Front cans · ${cans?.state}`}
+      </button>
+      <button type="button" className="est-tap" onClick={openOutdoor} style={{ ...chip, color: motion.length ? T.warn : T.dim }}>
+        {motion.length ? `Motion · ${motion.join(', ')}` : 'Cameras quiet'}
+      </button>
+      <button type="button" className="est-tap" onClick={openOutdoor} style={{ ...chip, color: watering ? T.ok : T.dim }}>
+        {watering ? 'Sprinklers running' : 'Sprinklers idle'}
+      </button>
+      <button type="button" className="est-tap" onClick={openOutdoor} style={{ ...chip, color: T.gold }}>
+        Outdoor &rarr;
+      </button>
+    </div>
+  );
+}
+
 /**
  * The Nest face, drawn the way the device itself draws it: a dark dial that
  * glows from the rim with whatever the system is doing, a tick ring for the
@@ -3497,12 +3660,42 @@ function ScentPanel({ hass }: { hass: Hass }) {
   );
 }
 
+const ROOM_TABS = [
+  { id: 'indoor', label: 'Indoor' },
+  { id: 'outdoor', label: 'Outdoor' },
+] as const;
+type RoomTab = (typeof ROOM_TABS)[number]['id'];
+
 function RoomsPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   // Was a flat list of every fixture in the house. Rooms are now browsed
   // room-first — pick the room, then what's in it — which is how this kind of
   // system is meant to read. See RoomsGrid.
+  const [tab, setTab] = useState<RoomTab>(() => (sectionFromHash() === 'outdoor' ? 'outdoor' : 'indoor'));
+  // Same as the Sky tabs: replaceState so this does not fire `hashchange`.
+  const pickTab = (id: RoomTab) => {
+    setTab(id);
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#rooms/${id}`);
+  };
+  const tabs = (
+    <Glass style={{ padding: 10 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} role="tablist" aria-label="Rooms page sections">
+        {ROOM_TABS.map((t) => (
+          <Pill key={t.id} active={tab === t.id} onClick={() => pickTab(t.id)}>{t.label}</Pill>
+        ))}
+      </div>
+    </Glass>
+  );
+  if (tab === 'outdoor') {
+    return (
+      <div style={{ display: 'grid', gap: 18 }}>
+        {tabs}
+        <OutdoorSection hass={hass} narrow={narrow} />
+      </div>
+    );
+  }
   return (
     <div style={{ display: 'grid', gap: 18 }}>
+      {tabs}
       {/* Favourites first. Whatever you pinned is what you came to touch, and
           making it wait below a panorama and a room grid put two scrolls
           between you and the thing you actually wanted. */}
