@@ -2465,6 +2465,84 @@ const rgbCss = (e: HassEntity | undefined): string | null => {
   return e?.state === 'on' && c ? `rgb(${c[0]}, ${c[1]}, ${c[2]})` : null;
 };
 
+/*
+ * Drag-to-pick colour wheel. Hue runs round the rim, saturation from white at
+ * the centre to full colour at the edge - the same model the bulbs take, so
+ * what the thumb sits on is what gets sent.
+ *
+ * The thumb follows the finger locally; the light gets a command at most every
+ * `every` ms while dragging and once more on release, so a sweep across the
+ * wheel is a handful of Zigbee frames rather than a flood the mesh drops.
+ */
+function ColorWheel({ hs, onPick, size = 210, every = 300, disabled }: {
+  hs: [number, number] | null; onPick: (hs: [number, number]) => void;
+  size?: number; every?: number; disabled?: boolean;
+}) {
+  const [draft, setDraft] = useState<[number, number] | null>(null);
+  const dragging = useRef(false);
+  const lastSent = useRef(0);
+  const pending = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(pending.current), []);
+  // Drop the local draft once the light reports something close to it.
+  useEffect(() => {
+    if (!draft || dragging.current || !hs) return undefined;
+    const t = window.setTimeout(() => setDraft(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [hs, draft]);
+
+  const shown = draft ?? hs;
+  const at = (ev: React.PointerEvent<HTMLDivElement>): [number, number] => {
+    const r = ev.currentTarget.getBoundingClientRect();
+    const dx = ev.clientX - (r.left + r.width / 2);
+    const dy = ev.clientY - (r.top + r.height / 2);
+    const hue = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
+    const sat = Math.min(1, Math.hypot(dx, dy) / (r.width / 2)) * 100;
+    return [Math.round(hue), Math.round(sat)];
+  };
+  const push = (v: [number, number], final: boolean) => {
+    setDraft(v);
+    window.clearTimeout(pending.current);
+    const wait = every - (Date.now() - lastSent.current);
+    if (final || wait <= 0) { lastSent.current = Date.now(); onPick(v); return; }
+    pending.current = window.setTimeout(() => { lastSent.current = Date.now(); onPick(v); }, wait);
+  };
+
+  const R = size / 2;
+  const thumb = shown
+    ? { x: R + Math.cos(shown[0] * Math.PI / 180) * R * (shown[1] / 100), y: R + Math.sin(shown[0] * Math.PI / 180) * R * (shown[1] / 100) }
+    : null;
+
+  return (
+    <div
+      role="slider" aria-label="Colour wheel" aria-valuetext={shown ? `hue ${shown[0]}, saturation ${shown[1]}%` : 'no colour'}
+      onPointerDown={(ev) => {
+        if (disabled) return;
+        dragging.current = true;
+        ev.currentTarget.setPointerCapture(ev.pointerId);
+        push(at(ev), false);
+      }}
+      onPointerMove={(ev) => { if (dragging.current) push(at(ev), false); }}
+      onPointerUp={(ev) => { if (!dragging.current) return; dragging.current = false; push(at(ev), true); }}
+      onPointerCancel={() => { dragging.current = false; }}
+      style={{
+        position: 'relative', width: size, height: size, borderRadius: '50%', margin: '0 auto',
+        touchAction: 'none', cursor: disabled ? 'default' : 'crosshair', opacity: disabled ? 0.4 : 1,
+        background: `radial-gradient(circle closest-side, #fff, rgba(255,255,255,0)),
+          conic-gradient(from 90deg, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)`,
+        boxShadow: '0 6px 30px rgba(0,0,0,0.35)',
+      }}
+    >
+      {thumb && (
+        <span style={{
+          position: 'absolute', left: thumb.x - 13, top: thumb.y - 13, width: 26, height: 26, borderRadius: '50%',
+          border: '3px solid #fff', boxShadow: '0 0 0 1px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.5)',
+          background: `hsl(${shown![0]}, ${shown![1]}%, ${100 - shown![1] / 2}%)`, pointerEvents: 'none',
+        }} />
+      )}
+    </div>
+  );
+}
+
 function FrontCans({ hass }: { hass: Hass }) {
   const ids = useMemo(() => [FRONT_CANS, ...FRONT_CAN_IDS, 'input_boolean.halloween_mode'], []);
   const e = useEntities(hass, ids);
@@ -2571,6 +2649,15 @@ function FrontCans({ hass }: { hass: Hass }) {
           </div>
         </>
       )}
+
+      <span style={{ ...LABEL, display: 'block', marginBottom: 10 }}>Colour wheel</span>
+      <div style={{ marginBottom: 18 }}>
+        <ColorWheel
+          disabled={noPower}
+          hs={on && mode !== 'color_temp' ? ((attr(light, 'hs_color') as [number, number] | undefined) ?? null) : null}
+          onPick={(hsv) => send({ hs_color: hsv })}
+        />
+      </div>
 
       <span style={{ ...LABEL, display: 'block', marginBottom: 8 }}>White</span>
       <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
@@ -2719,6 +2806,99 @@ function SprinklerStatus({ hass }: { hass: Hass }) {
   );
 }
 
+/*
+ * House jobs: blowouts, filters, gutters. They live on the Family Calendar as
+ * events with 🔧 in the title, and packages/home_maintenance.yaml pushes a
+ * reminder the evening before and the morning of. This card lists what is
+ * coming, adds new ones, and holds the two switches that go with them.
+ */
+type CalEvent = { start: string; end: string; summary: string; description?: string };
+const UPKEEP_CAL = 'calendar.family_calendar';
+const UPKEEP_MARK = '🔧';
+
+function Upkeep({ hass }: { hass: Hass }) {
+  const conn = hass.connection;
+  const [jobs, setJobs] = useState<CalEvent[] | null>(null);
+  const [rev, setRev] = useState(0);
+  const [title, setTitle] = useState('');
+  const [date, setDate] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const end = new Date(start); end.setDate(end.getDate() + 180);
+    conn.sendMessagePromise<{ response: Record<string, { events: CalEvent[] }> }>({
+      type: 'call_service', domain: 'calendar', service: 'get_events', target: { entity_id: UPKEEP_CAL },
+      service_data: { start_date_time: start.toISOString(), end_date_time: end.toISOString() }, return_response: true,
+    }).then((r) => {
+      const all = r.response?.[UPKEEP_CAL]?.events ?? [];
+      if (live) setJobs(all.filter((x) => x.summary.includes(UPKEEP_MARK)).sort((a, b) => a.start.localeCompare(b.start)));
+    }, () => live && setJobs([]));
+    return () => { live = false; };
+  }, [conn, rev]);
+
+  const add = async () => {
+    const t = title.trim();
+    if (!t || !date) return;
+    setBusy(true);
+    const next = new Date(`${date}T00:00:00`); next.setDate(next.getDate() + 1);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const endDate = `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}`;
+    try {
+      await hass.callService('calendar', 'create_event', {
+        summary: t.includes(UPKEEP_MARK) ? t : `${UPKEEP_MARK} ${t}`, start_date: date, end_date: endDate,
+      }, { entity_id: UPKEEP_CAL });
+      setTitle(''); setDate(''); setRev((n) => n + 1);
+    } finally { setBusy(false); }
+  };
+
+  const when = (s: string) => {
+    const d = s.includes('T') ? new Date(s) : new Date(`${s}T00:00:00`);
+    const label = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    return s.includes('T') ? `${label} · ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}` : label;
+  };
+  const input: CSSProperties = {
+    font: 'inherit', fontSize: 13, padding: '8px 10px', borderRadius: 9, minWidth: 0,
+    border: `1px solid ${T.line}`, background: 'rgba(255,255,255,0.05)', color: T.text, colorScheme: 'dark',
+  };
+
+  return (
+    <Glass>
+      <PanelHead label="🔧 Upkeep" />
+      {!jobs ? (
+        <div style={{ fontSize: 12.5, color: T.faint }}>Reading the calendar&hellip;</div>
+      ) : jobs.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: T.dim }}>Nothing scheduled in the next six months.</div>
+      ) : (
+        <div style={{ display: 'grid', gap: 8, marginBottom: 6 }}>
+          {jobs.map((j) => (
+            <div key={`${j.start}${j.summary}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13 }}>
+              <span>{j.summary.replace(UPKEEP_MARK, '').trim()}</span>
+              <span style={{ color: T.dim, whiteSpace: 'nowrap' }}>{when(j.start)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '12px 0 4px' }}>
+        <input style={{ ...input, flex: '1 1 140px' }} placeholder="Add a job, e.g. Furnace filter"
+          value={title} onChange={(ev) => setTitle(ev.target.value)} aria-label="Job" />
+        <input style={{ ...input, flex: '0 0 auto' }} type="date" value={date}
+          onChange={(ev) => setDate(ev.target.value)} aria-label="Date" />
+        <Pill onClick={() => void add()} active={!!title.trim() && !!date && !busy}>Add</Pill>
+      </div>
+
+      <SettingBooleanToggle hass={hass} entity="input_boolean.maintenance_reminders"
+        label="Remind me"
+        hint="A push at 7 pm the evening before and 7:30 am the day of, for anything here." />
+      <SettingBooleanToggle hass={hass} entity={`${RACHIO}_standby`}
+        label="Sprinklers on winter standby"
+        hint="On after the blowout so nothing refills the lines. The evening of a blowout, a push offers to do this." />
+    </Glass>
+  );
+}
+
 function OutdoorSection({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const cols = narrow ? 1 : 3;
   return (
@@ -2726,6 +2906,7 @@ function OutdoorSection({ hass, narrow }: { hass: Hass; narrow: boolean }) {
       <FrontCans hass={hass} />
       <OutdoorCams hass={hass} narrow={narrow} />
       <SprinklerStatus hass={hass} />
+      <Upkeep hass={hass} />
     </div>
   );
 }
@@ -6788,7 +6969,8 @@ function SettingBooleanToggle({ hass, entity, label, hint }: {
       </div>
       <Pill
         active={on}
-        onClick={() => { if (!missing) void hass.callService('input_boolean', on ? 'turn_off' : 'turn_on', {}, { entity_id: entity }); }}
+        // The entity's own domain, so a plain switch (the Rachio standby) works too.
+        onClick={() => { if (!missing) void hass.callService(entity.split('.')[0], on ? 'turn_off' : 'turn_on', {}, { entity_id: entity }); }}
       >
         {missing ? '--' : on ? 'On' : 'Off'}
       </Pill>
