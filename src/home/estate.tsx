@@ -1909,7 +1909,13 @@ const SOUND_EMOJI: Record<string, string> = {
   thunder: '⛈️', creaky_door: '🚪', heartbeat: '💓', wolf_howl: '🐺', ghost_moan: '👻',
   chains: '⛓️', church_bell: '🔔', owl: '🦉', organ: '🎹', wind: '🌬️', cackle: '🧙',
   theremin: '🛸', door_slam: '💥', zombie_groan: '🧟',
+  evil_laugh: '😈', evil_laugh_2: '😈', scream: '😱', cat_hiss: '🐈', crow: '🐦‍⬛', eerie: '🪐',
 };
+/* Real recordings are spooky_<key>, the synthesised first drafts halloween_<key>.
+   When both exist the recording wins and the draft is hidden, not deleted -
+   bin/halloween/spooky_sounds.py can always make the drafts again. Two drafts
+   were replaced under a different name. */
+const DRAFT_REPLACED_BY: Record<string, string> = { cackle: 'evil_laugh', ghost_moan: 'eerie' };
 const EFFECT_EMOJI: Record<string, string> = {
   None: '⏹️', Flicker: '🔥', Pulse: '💓', 'Spooky fade': '🧪', Strobe: '⚡',
   Chase: '🎃', Ghost: '👻', Storm: '⛈️',
@@ -1941,15 +1947,19 @@ function useHalloweenSounds(hass: Hass): Sound[] | null {
       const found = (r.children ?? [])
         .filter((c) => !c.can_expand)
         .map((c) => {
-          const m = /\/halloween_([^/]+)\.(wav|mp3|ogg|m4a|aac|flac)$/i.exec(c.media_content_id);
+          const m = /\/(halloween|spooky)_([^/]+)\.(wav|mp3|ogg|m4a|aac|flac)$/i.exec(c.media_content_id);
           if (!m) return null;
-          const key = m[1].toLowerCase();
+          const key = m[2].toLowerCase();
           const label = key.replace(/[_-]+/g, ' ').replace(/^\w/, (x) => x.toUpperCase());
-          return { id: c.media_content_id, key, label };
+          return { id: c.media_content_id, key, label, real: m[1].toLowerCase() === 'spooky' };
         })
-        .filter((s): s is Sound => s !== null)
+        .filter((s): s is Sound & { real: boolean } => s !== null);
+      const realKeys = new Set(found.filter((x) => x.real).map((x) => x.key));
+      const shown = found
+        .filter((x) => x.real || (!realKeys.has(x.key) && !realKeys.has(DRAFT_REPLACED_BY[x.key] ?? '')))
+        .map(({ id, key, label }) => ({ id, key, label }))
         .sort((a, b) => a.label.localeCompare(b.label));
-      if (live) setSounds(found);
+      if (live) setSounds(shown);
     }, () => live && setSounds([]));
     return () => { live = false; };
   }, [conn]);
@@ -2050,7 +2060,7 @@ function SoundBoard({ hass, span }: { hass: Hass; span: number }) {
         <div style={{ fontSize: 12.5, color: T.faint }}>Finding the sounds&hellip;</div>
       ) : sounds.length === 0 ? (
         <div style={{ fontSize: 12.5, color: T.dim }}>
-          No sounds yet. Upload audio files named <code>halloween_something.mp3</code> in HA &rarr; Media &rarr; My media.
+          No sounds yet. Upload audio files named <code>spooky_something.mp3</code> in HA &rarr; Media &rarr; My media.
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 8 }}>
@@ -2076,7 +2086,7 @@ function SoundBoard({ hass, span }: { hass: Hass; span: number }) {
         </div>
       )}
       <div style={{ fontSize: 11, color: T.faint, marginTop: 12, lineHeight: 1.55 }}>
-        Add your own: any file named <code>halloween_&hellip;</code> in HA &rarr; Media &rarr; My media shows up here.
+        Add your own: any file named <code>spooky_&hellip;</code> in HA &rarr; Media &rarr; My media shows up here.
       </div>
     </Glass>
   );
