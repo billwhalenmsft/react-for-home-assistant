@@ -1855,6 +1855,8 @@ const HALLOWEEN_SPEAKERS = ['None', 'Family Room Sonos', 'Bedroom Sonos'];
 function HalloweenCard({ hass, span }: { hass: Hass; span: number }) {
   const speaker = useEntity(hass, 'input_select.halloween_speaker')?.state ?? 'None';
   const visitors = Math.round(Number(useEntity(hass, 'input_number.halloween_visitors')?.state ?? 0)) || 0;
+  const scareLevel = useEntity(hass, 'input_select.halloween_scare_level')?.state ?? 'Auto';
+  const scareNow = useEntity(hass, 'sensor.halloween_scare_now')?.state ?? 'little';
   const pick = (option: string) =>
     void hass.callService('input_select', 'select_option', { option },
       { entity_id: 'input_select.halloween_speaker' });
@@ -1874,6 +1876,27 @@ function HalloweenCard({ hass, span }: { hass: Hass; span: number }) {
       <SettingBooleanToggle hass={hass} entity="input_boolean.halloween_ambient_lightning"
         label="Ambient lightning"
         hint="A silent flicker every five minutes or so while Trick-or-treat is on, for the street." />
+      <div style={{ padding: '14px 0', borderBottom: `1px solid ${T.line}` }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
+          <span style={{ fontSize: 14.5, fontWeight: 500 }}>Scare level</span>
+          <span style={{ fontSize: 12, color: scareNow === 'scary' ? T.alert : T.ok }}>
+            {scareNow === 'scary' ? 'Scary right now' : 'Little kids right now'}
+          </span>
+        </div>
+        <div style={{ fontSize: 11.5, color: T.dim, margin: '2px 0 10px' }}>
+          Little kids: the door gets an owl, a howl or a witch's laugh, and the sound board hides the
+          scariest buttons. Scary: thunder and lightning. Auto switches at the time below.
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {['Auto', 'Little kids', 'Scary'].map((o) => (
+            <Pill key={o} active={scareLevel === o}
+              onClick={() => void hass.callService('input_select', 'select_option', { option: o },
+                { entity_id: 'input_select.halloween_scare_level' })}>{o}</Pill>
+          ))}
+        </div>
+      </div>
+      <SettingTime hass={hass} entity="input_datetime.halloween_scary_after"
+        label="Scary after" hint="When Auto turns from little kids to scary." />
       <div style={{ padding: '14px 0', borderBottom: `1px solid ${T.line}` }}>
         <div style={{ fontSize: 14.5, fontWeight: 500 }}>Door thunder plays on</div>
         <div style={{ fontSize: 11.5, color: T.dim, margin: '2px 0 10px' }}>
@@ -1935,6 +1958,9 @@ const EFFECT_EMOJI: Record<string, string> = {
 const EFFECT_SWATCH: Record<string, string> = {
   Orange: '#ff6a00', Purple: '#8200ff', Green: '#28ff1e', Red: '#ff1a1a', White: '#f4f1ea',
 };
+/* Hidden from the board while the scare level says little kids. */
+const SCARY_SOUNDS = new Set(['thunder', 'scream', 'zombie_groan', 'door_slam', 'chains', 'evil_laugh_2', 'heartbeat']);
+
 const SOUND_SPEAKERS: ReadonlyArray<{ id: string; label: string; note?: string }> = [
   { id: 'here', label: 'This device' },
   { id: 'media_player.family_room_family_room', label: 'Family Room Sonos', note: 'This one sits in the office.' },
@@ -2013,7 +2039,10 @@ const resolveUrl = async (hass: Hass, id: string) => {
  */
 function SoundBoard({ hass, span }: { hass: Hass; span: number }) {
   const all = useHalloweenSounds(hass);
-  const sounds = all?.filter((x) => !x.key.startsWith('bg_')) ?? null;
+  const little = useEntity(hass, 'sensor.halloween_scare_now')?.state !== 'scary';
+  const [showAll, setShowAll] = useState(false);
+  const sounds = all?.filter((x) => !x.key.startsWith('bg_') && (!little || showAll || !SCARY_SOUNDS.has(x.key))) ?? null;
+  const hiddenCount = little && !showAll ? (all ?? []).filter((x) => SCARY_SOUNDS.has(x.key)).length : 0;
   const tracks = all?.filter((x) => x.key.startsWith('bg_')) ?? [];
   const [target, setTarget] = useState<string>(() => {
     try { return window.localStorage.getItem('estate.halloween.speaker') ?? 'here'; } catch { return 'here'; }
@@ -2180,6 +2209,12 @@ function SoundBoard({ hass, span }: { hass: Hass; span: number }) {
             </button>
           ))}
         </div>
+      )}
+      {little && (
+        <button type="button" className="est-tap" onClick={() => setShowAll((v) => !v)}
+          style={{ font: 'inherit', fontSize: 12, marginTop: 10, border: 'none', background: 'transparent', color: T.gold, cursor: 'pointer', padding: 0 }}>
+          {showAll ? 'Hide the scary ones again' : `Little-kids mode: ${hiddenCount} scary sounds hidden - show them`}
+        </button>
       )}
       <div style={{ fontSize: 11, color: T.faint, marginTop: 12, lineHeight: 1.55 }}>
         Add your own in HA &rarr; Media &rarr; My media: <code>spooky_&hellip;</code> for a button,
