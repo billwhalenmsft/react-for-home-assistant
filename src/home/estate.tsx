@@ -1854,6 +1854,7 @@ const HALLOWEEN_SPEAKERS = ['None', 'Family Room Sonos', 'Bedroom Sonos'];
 
 function HalloweenCard({ hass, span }: { hass: Hass; span: number }) {
   const speaker = useEntity(hass, 'input_select.halloween_speaker')?.state ?? 'None';
+  const visitors = Math.round(Number(useEntity(hass, 'input_number.halloween_visitors')?.state ?? 0)) || 0;
   const pick = (option: string) =>
     void hass.callService('input_select', 'select_option', { option },
       { entity_id: 'input_select.halloween_speaker' });
@@ -1883,6 +1884,17 @@ function HalloweenCard({ hass, span }: { hass: Hass; span: number }) {
             <Pill key={s} active={speaker === s} onClick={() => pick(s)}>{s}</Pill>
           ))}
         </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '14px 0', borderBottom: `1px solid ${T.line}` }}>
+        <span style={{ fontSize: 30, fontWeight: 250, fontVariantNumeric: 'tabular-nums' }}>{visitors}</span>
+        <span style={{ fontSize: 12.5, color: T.dim, flex: 1 }}>
+          door openings during trick-or-treat - roughly, how many groups came. Resets at 5 pm on the 31st.
+        </span>
+        <button type="button" className="est-tap"
+          onClick={() => void hass.callService('input_number', 'set_value', { value: 0 }, { entity_id: 'input_number.halloween_visitors' })}
+          style={{ font: 'inherit', fontSize: 11.5, border: 'none', background: 'transparent', color: T.faint, cursor: 'pointer' }}>
+          Reset
+        </button>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, paddingTop: 14 }}>
         <FirePill hass={hass} script="script.halloween_lightning" label="Test lightning" />
@@ -1966,49 +1978,113 @@ function useHalloweenSounds(hass: Hass): Sound[] | null {
   return sounds;
 }
 
+/* A slider bound to an input_number: the thumb follows the finger from a
+   local draft and HA gets one write when the finger settles. */
+function useHaPercent(hass: Hass, entity: string, fallback: number) {
+  const ha = Number(useEntity(hass, entity)?.state ?? fallback);
+  const [draft, setDraft] = useState<number | null>(null);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  useEffect(() => { if (draft != null && Math.abs(draft - ha) < 3) setDraft(null); }, [ha, draft]);
+  const value = draft ?? (Number.isFinite(ha) ? ha : fallback);
+  const set = (v: number) => {
+    const snapped = Math.max(5, Math.round(v / 5) * 5);
+    setDraft(snapped);
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => void hass.callService('input_number', 'set_value',
+      { value: snapped }, { entity_id: entity }), 250);
+    return snapped;
+  };
+  return [value, set] as const;
+}
+
+const resolveUrl = async (hass: Hass, id: string) => {
+  const r = await hass.connection.sendMessagePromise<{ url: string }>(
+    { type: 'media_source/resolve_media', media_content_id: id, expires: 3600 });
+  return r.url.startsWith('http') ? r.url : `${window.location.origin}${r.url}`;
+};
+
+/*
+ * Two layers. A background track loops underneath (spooky_bg_* files), and
+ * every button plays over the top of it. On a Sonos the buttons go out as
+ * audio clips, which Sonos mixes over whatever is playing; on "This device"
+ * the browser simply plays two things at once. Each button also fires its
+ * light cue on the front cans when "Lights react to sounds" is on.
+ */
 function SoundBoard({ hass, span }: { hass: Hass; span: number }) {
-  const sounds = useHalloweenSounds(hass);
+  const all = useHalloweenSounds(hass);
+  const sounds = all?.filter((x) => !x.key.startsWith('bg_')) ?? null;
+  const tracks = all?.filter((x) => x.key.startsWith('bg_')) ?? [];
   const [target, setTarget] = useState<string>(() => {
     try { return window.localStorage.getItem('estate.halloween.speaker') ?? 'here'; } catch { return 'here'; }
   });
-  const pickTarget = (id: string) => {
-    setTarget(id);
-    try { window.localStorage.setItem('estate.halloween.speaker', id); } catch { /* private window */ }
-  };
   const [playing, setPlaying] = useState<string | null>(null);
+  const [bg, setBg] = useState<string | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
-  useEffect(() => () => { audio.current?.pause(); }, []);
+  const bgAudio = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => () => { audio.current?.pause(); bgAudio.current?.pause(); }, []);
 
-  // Volume lives in HA so the door thunder and the board agree. The draft
-  // keeps the thumb under the finger until HA echoes the value back.
-  const volEnt = useEntity(hass, 'input_number.halloween_volume');
-  const volHa = Number(volEnt?.state ?? 50);
-  const [volDraft, setVolDraft] = useState<number | null>(null);
-  const volTimer = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(volTimer.current), []);
-  useEffect(() => { if (volDraft != null && Math.abs(volDraft - volHa) < 3) setVolDraft(null); }, [volHa, volDraft]);
-  const vol = volDraft ?? (Number.isFinite(volHa) ? volHa : 50);
-  const setVol = (v: number) => {
-    const snapped = Math.max(5, Math.round(v / 5) * 5);
-    setVolDraft(snapped);
-    if (audio.current) audio.current.volume = snapped / 100;
-    window.clearTimeout(volTimer.current);
-    volTimer.current = window.setTimeout(() => void hass.callService('input_number', 'set_value',
-      { value: snapped }, { entity_id: 'input_number.halloween_volume' }), 250);
+  const [vol, setVolHa] = useHaPercent(hass, 'input_number.halloween_volume', 50);
+  const [bgVol, setBgVolHa] = useHaPercent(hass, 'input_number.halloween_bg_volume', 25);
+  const setVol = (v: number) => { const x = setVolHa(v); if (audio.current) audio.current.volume = x / 100; };
+  const bgTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(bgTimer.current), []);
+  const setBgVol = (v: number) => {
+    const x = setBgVolHa(v);
+    if (bgAudio.current) bgAudio.current.volume = x / 100;
+    if (target !== 'here' && bg) {
+      // The Sonos background is the speaker's own volume; follow the slider.
+      window.clearTimeout(bgTimer.current);
+      bgTimer.current = window.setTimeout(() => void hass.callService('media_player', 'volume_set',
+        { volume_level: x / 100 }, { entity_id: target }), 300);
+    }
   };
 
   const speaker = useEntity(hass, target === 'here' ? 'sun.sun' : target);
   const speakerDown = target !== 'here' && (!speaker || speaker.state === 'unavailable');
 
+  const stopBg = () => {
+    bgAudio.current?.pause();
+    bgAudio.current = null;
+    if (target !== 'here' && bg) void hass.callService('script', 'halloween_background', { media: 'stop', speaker: target });
+    setBg(null);
+  };
+
+  const pickTarget = (id: string) => {
+    if (id === target) return;
+    stopBg();
+    audio.current?.pause();
+    setTarget(id);
+    try { window.localStorage.setItem('estate.halloween.speaker', id); } catch { /* private window */ }
+  };
+
+  const startBg = async (t: Sound) => {
+    if (bg === t.key) { stopBg(); return; }
+    setBg(t.key);
+    if (target === 'here') {
+      try {
+        bgAudio.current?.pause();
+        const a = new Audio(await resolveUrl(hass, t.id));
+        a.loop = true;
+        a.volume = bgVol / 100;
+        bgAudio.current = a;
+        await a.play();
+      } catch { setBg(null); }
+      return;
+    }
+    void hass.callService('script', 'halloween_background', { media: t.id, speaker: target });
+  };
+
   const play = async (s: Sound) => {
     setPlaying(s.key);
     window.setTimeout(() => setPlaying((p) => (p === s.key ? null : p)), 1600);
+    // Lights first: Zigbee is quicker than a Sonos clip starting, so the two
+    // land together. The script itself checks the "react to sounds" switch.
+    void hass.callService('script', 'turn_on', { variables: { key: s.key } }, { entity_id: 'script.halloween_sound_cue' });
     if (target === 'here') {
       try {
-        const r = await hass.connection.sendMessagePromise<{ url: string }>(
-          { type: 'media_source/resolve_media', media_content_id: s.id, expires: 3600 });
         audio.current?.pause();
-        const a = new Audio(r.url.startsWith('http') ? r.url : `${window.location.origin}${r.url}`);
+        const a = new Audio(await resolveUrl(hass, s.id));
         a.volume = vol / 100;
         audio.current = a;
         await a.play();
@@ -2018,21 +2094,35 @@ function SoundBoard({ hass, span }: { hass: Hass; span: number }) {
     void hass.callService('script', 'halloween_play_sound', { media: s.id, speaker: target });
   };
 
-  const stop = () => {
+  const stopAll = () => {
     audio.current?.pause();
+    bgAudio.current?.pause();
+    bgAudio.current = null;
+    setBg(null);
     if (target !== 'here') void hass.callService('media_player', 'media_stop', {}, { entity_id: target });
   };
 
   const note = SOUND_SPEAKERS.find((x) => x.id === target)?.note;
+  const slider = (label: string, value: number, onChange: (v: number) => void, aria: string) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+      <span style={{ ...LABEL, width: 78 }}>{label}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <GoldSlider value={value} ariaLabel={aria} onChange={onChange} />
+      </div>
+      <span style={{ fontSize: 13, color: T.dim, width: 38, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+        {`${Math.round(value)}%`}
+      </span>
+    </div>
+  );
 
   return (
     <Glass span={span}>
       <PanelHead label="🔊 Sound board" right={
-        <button type="button" onClick={stop} className="est-tap"
+        <button type="button" onClick={stopAll} className="est-tap"
           style={{
             font: 'inherit', fontSize: 12, padding: '5px 12px', borderRadius: 999, cursor: 'pointer',
             border: `1px solid ${T.line}`, background: 'transparent', color: T.dim,
-          }}>Stop</button>
+          }}>Stop all</button>
       } />
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
@@ -2040,21 +2130,27 @@ function SoundBoard({ hass, span }: { hass: Hass; span: number }) {
           <Pill key={s.id} active={target === s.id} onClick={() => pickTarget(s.id)}>{s.label}</Pill>
         ))}
       </div>
-      <div style={{ fontSize: 11.5, color: speakerDown ? T.alert : T.faint, marginBottom: 12, minHeight: 16 }}>
+      <div style={{ fontSize: 11.5, color: speakerDown ? T.alert : T.faint, marginBottom: 14, minHeight: 16 }}>
         {speakerDown ? 'That speaker is offline right now.'
           : target === 'here' ? 'Plays on the phone or tablet in your hand - leave one by the door as a speaker.'
             : note ?? ''}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-        <span style={{ ...LABEL, width: 58 }}>Volume</span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <GoldSlider value={vol} ariaLabel="Halloween volume" onChange={setVol} />
-        </div>
-        <span style={{ fontSize: 13, color: T.dim, width: 38, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-          {`${Math.round(vol)}%`}
-        </span>
-      </div>
+      {tracks.length > 0 && (
+        <>
+          <span style={{ ...LABEL, display: 'block', marginBottom: 8 }}>Background</span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+            <Pill active={bg === null} onClick={stopBg}>Off</Pill>
+            {tracks.map((t) => (
+              <Pill key={t.id} active={bg === t.key} onClick={() => { if (!speakerDown) void startBg(t); }}>
+                {t.label.replace(/^Bg /, '')}
+              </Pill>
+            ))}
+          </div>
+          {slider('Music', bgVol, setBgVol, 'Background volume')}
+        </>
+      )}
+      {slider('Effects', vol, setVol, 'Effects volume')}
 
       {!sounds ? (
         <div style={{ fontSize: 12.5, color: T.faint }}>Finding the sounds&hellip;</div>
@@ -2063,7 +2159,7 @@ function SoundBoard({ hass, span }: { hass: Hass; span: number }) {
           No sounds yet. Upload audio files named <code>spooky_something.mp3</code> in HA &rarr; Media &rarr; My media.
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 8, marginTop: 4 }}>
           {sounds.map((s) => (
             <button
               key={s.id} type="button" className="est-lift est-tap" onClick={() => void play(s)}
@@ -2086,7 +2182,8 @@ function SoundBoard({ hass, span }: { hass: Hass; span: number }) {
         </div>
       )}
       <div style={{ fontSize: 11, color: T.faint, marginTop: 12, lineHeight: 1.55 }}>
-        Add your own: any file named <code>spooky_&hellip;</code> in HA &rarr; Media &rarr; My media shows up here.
+        Add your own in HA &rarr; Media &rarr; My media: <code>spooky_&hellip;</code> for a button,
+        {' '}<code>spooky_bg_&hellip;</code> for a background track.
       </div>
     </Glass>
   );
@@ -2155,6 +2252,10 @@ function LightShow({ hass }: { hass: Hass }) {
         </span>
       </div>
 
+      <SettingBooleanToggle hass={hass} entity="input_boolean.halloween_sound_lights"
+        label="Lights react to sounds"
+        hint="Zombies flash green and red, the scream strobes red, thunder is lightning, the slam blacks out." />
+      <div style={{ height: 14 }} />
       <span style={{ ...LABEL, display: 'block', marginBottom: 8 }}>Colour for Pulse and Strobe</span>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {colors.map((c) => (
