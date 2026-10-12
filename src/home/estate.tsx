@@ -2041,7 +2041,7 @@ function SoundBoard({ hass, span }: { hass: Hass; span: number }) {
   const all = useHalloweenSounds(hass);
   const little = useEntity(hass, 'sensor.halloween_scare_now')?.state !== 'scary';
   const [showAll, setShowAll] = useState(false);
-  const sounds = all?.filter((x) => !x.key.startsWith('bg_') && (!little || showAll || !SCARY_SOUNDS.has(x.key))) ?? null;
+  const sounds = all?.filter((x) => !x.key.startsWith('bg_') && !x.key.startsWith('spell_') && (!little || showAll || !SCARY_SOUNDS.has(x.key))) ?? null;
   const hiddenCount = little && !showAll ? (all ?? []).filter((x) => SCARY_SOUNDS.has(x.key)).length : 0;
   const tracks = all?.filter((x) => x.key.startsWith('bg_')) ?? [];
   const [target, setTarget] = useState<string>(() => {
@@ -2315,6 +2315,57 @@ function LightShow({ hass }: { hass: Hass }) {
   );
 }
 
+/*
+ * Wand spells. The Pi by the door recognises the shape a wand tip draws and
+ * posts it to HA (packages/halloween_wands.yaml); this card is the switch,
+ * the scoreboard, and a test button for every spell so the effects can be
+ * tried before the Pi exists. Spells drive lights and sound, nothing else.
+ */
+const SPELLS: ReadonlyArray<{ id: string; name: string; gesture: string; emoji: string }> = [
+  { id: 'lumos', name: 'Lumos', gesture: 'circle', emoji: '✨' },
+  { id: 'nox', name: 'Nox', gesture: 'flick down', emoji: '🌑' },
+  { id: 'incendio', name: 'Incendio', gesture: 'flick up', emoji: '🔥' },
+  { id: 'colovaria', name: 'Colovaria', gesture: 'Z swish', emoji: '🌈' },
+  { id: 'leviosa', name: 'Leviosa', gesture: 'swish and flick', emoji: '🪶' },
+];
+
+function WandCard({ hass }: { hass: Hass }) {
+  const last = useEntity(hass, 'input_text.halloween_last_spell')?.state;
+  const cast = Math.round(Number(useEntity(hass, 'input_number.halloween_spells_cast')?.state ?? 0)) || 0;
+  return (
+    <AlertBlock label="🪄 Wand spells"
+      note="A Pi camera by the door watches for the glowing wand tip and turns the shape into a spell. Until it arrives, the buttons below cast them by hand.">
+      <SettingBooleanToggle hass={hass} entity="input_boolean.halloween_wands"
+        label="Wands active" hint="Off and the door ignores every wand, however hard it is waved." />
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '14px 0', borderBottom: `1px solid ${T.line}` }}>
+        <span style={{ fontSize: 30, fontWeight: 250, fontVariantNumeric: 'tabular-nums' }}>{cast}</span>
+        <span style={{ fontSize: 12.5, color: T.dim, flex: 1 }}>
+          {`spells cast${last && last !== 'unknown' ? ` · last: ${last}` : ''}`}
+        </span>
+        <button type="button" className="est-tap"
+          onClick={() => void hass.callService('input_number', 'set_value', { value: 0 }, { entity_id: 'input_number.halloween_spells_cast' })}
+          style={{ font: 'inherit', fontSize: 11.5, border: 'none', background: 'transparent', color: T.faint, cursor: 'pointer' }}>
+          Reset
+        </button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(104px, 1fr))', gap: 8, paddingTop: 14 }}>
+        {SPELLS.map((sp) => (
+          <button key={sp.id} type="button" className="est-lift est-tap"
+            onClick={() => void hass.callService('script', 'halloween_spell', { spell: sp.id })}
+            style={{
+              borderRadius: 14, padding: '12px 6px', cursor: 'pointer', display: 'grid', placeItems: 'center', gap: 4,
+              font: 'inherit', color: T.text, border: `1px solid ${T.line}`, background: 'rgba(255,255,255,0.04)',
+            }}>
+            <span style={{ fontSize: 26, lineHeight: 1 }}>{sp.emoji}</span>
+            <span style={{ fontSize: 13, fontWeight: 500 }}>{sp.name}</span>
+            <span style={{ fontSize: 10.5, color: T.faint }}>{sp.gesture}</span>
+          </button>
+        ))}
+      </div>
+    </AlertBlock>
+  );
+}
+
 function HalloweenPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   const cols = narrow ? 1 : 3;
   return (
@@ -2325,6 +2376,7 @@ function HalloweenPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
       </div>
       <HalloweenCard hass={hass} span={narrow ? 1 : 2} />
       <FrontCans hass={hass} />
+      <WandCard hass={hass} />
     </div>
   );
 }
