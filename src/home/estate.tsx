@@ -1843,88 +1843,162 @@ function AlertBlock({ label, note, span, children }: {
 /* ============================================================= halloween */
 
 /*
- * The entry on Halloween night - packages/halloween.yaml does the work, this
- * card only flips its switches. It appears while Halloween mode is on, so it
- * is in reach on the night and gone the rest of the year.
+ * The Halloween page, in tabs - one job each:
  *
- * Speaker defaults to None on purpose: the "Family Room" Sonos actually sits
- * in the office, and a test button should never thunder next to a desk.
+ *   Tonight  the night's big switches and the scoreboard
+ *   Sounds   background music and the effect buttons
+ *   Lights   the light show and the front cans
+ *   Wand     the wand camera and spell buttons
+ *   Setup    the set-once choices
+ *
+ * packages/halloween.yaml and halloween_wands.yaml do the work; this only
+ * picks things. Nothing here touches a lock.
+ *
+ * The door speaker defaults to None on purpose: the "Family Room" Sonos
+ * actually sits in the office, and a test should never thunder next to a desk.
  */
 const HALLOWEEN_SPEAKERS = ['None', 'Family Room Sonos', 'Bedroom Sonos'];
 
-function HalloweenCard({ hass, span }: { hass: Hass; span: number }) {
-  const speaker = useEntity(hass, 'input_select.halloween_speaker')?.state ?? 'None';
+const HALLOWEEN_TABS = [
+  { id: 'tonight', label: '🎃 Tonight' },
+  { id: 'sounds', label: '🔊 Sounds' },
+  { id: 'lights', label: '✨ Lights' },
+  { id: 'wand', label: '🪄 Wand' },
+  { id: 'setup', label: '⚙️ Setup' },
+] as const;
+type HalloweenTab = (typeof HALLOWEEN_TABS)[number]['id'];
+
+/* "Online" = the wand Pi checked in within the last three minutes. */
+function useWandCamera(hass: Hass) {
+  const seen = useEntity(hass, 'input_datetime.halloween_wand_seen');
+  const status = useEntity(hass, 'input_text.halloween_wand_status')?.state;
+  const now = useNow(30000);
+  const ts = Number(attr(seen, 'timestamp'));
+  const ago = Number.isFinite(ts) && ts > 0 ? (now.getTime() / 1000 - ts) : Infinity;
+  return { online: ago < 180, ago, status: status && status !== 'unknown' ? status : '' };
+}
+
+function BigStat({ value, label }: { value: ReactNode; label: string }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: 30, fontWeight: 250, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>{value}</div>
+      <div style={{ fontSize: 11.5, color: T.dim, marginTop: 3 }}>{label}</div>
+    </div>
+  );
+}
+
+function TonightPanel({ hass, narrow, go }: { hass: Hass; narrow: boolean; go: (t: HalloweenTab) => void }) {
   const visitors = Math.round(Number(useEntity(hass, 'input_number.halloween_visitors')?.state ?? 0)) || 0;
+  const spells = Math.round(Number(useEntity(hass, 'input_number.halloween_spells_cast')?.state ?? 0)) || 0;
   const scareLevel = useEntity(hass, 'input_select.halloween_scare_level')?.state ?? 'Auto';
   const scareNow = useEntity(hass, 'sensor.halloween_scare_now')?.state ?? 'little';
-  const pick = (option: string) =>
-    void hass.callService('input_select', 'select_option', { option },
-      { entity_id: 'input_select.halloween_speaker' });
-
+  const cam = useWandCamera(hass);
+  const cols = narrow ? 1 : 2;
   return (
-    <AlertBlock
-      span={span}
-      label="🎃 Halloween"
-      note="The foyer light flickers like lightning whenever the front door opens while Trick-or-treat is on, and the bench diffuser glows. On Oct 31 it runs 5 to 9 pm by itself. Nothing here touches a lock."
-    >
-      <SettingBooleanToggle hass={hass} entity="input_boolean.halloween_mode"
-        label="Halloween mode"
-        hint="Bench diffuser purple, front cans orange. Off puts everything back." />
-      <SettingBooleanToggle hass={hass} entity="input_boolean.trick_or_treat"
-        label="Trick-or-treat"
-        hint="Foyer on, bench green, lightning when the door opens. Twenty seconds' rest between scares." />
-      <SettingBooleanToggle hass={hass} entity="input_boolean.halloween_ambient_lightning"
-        label="Ambient lightning"
-        hint="A silent flicker every five minutes or so while Trick-or-treat is on, for the street." />
-      <div style={{ padding: '14px 0', borderBottom: `1px solid ${T.line}` }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
-          <span style={{ fontSize: 14.5, fontWeight: 500 }}>Scare level</span>
-          <span style={{ fontSize: 12, color: scareNow === 'scary' ? T.alert : T.ok }}>
-            {scareNow === 'scary' ? 'Scary right now' : 'Little kids right now'}
-          </span>
+    <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+      <Glass>
+        <PanelHead label="The night" />
+        <SettingBooleanToggle hass={hass} entity="input_boolean.halloween_mode"
+          label="Halloween mode"
+          hint="Bench diffuser purple, front cans orange. Off puts everything back." />
+        <SettingBooleanToggle hass={hass} entity="input_boolean.trick_or_treat"
+          label="Trick-or-treat"
+          hint="Foyer on, cans green, a scare whenever the door opens. On Oct 31 it runs 5 to 9 pm by itself." />
+        <div style={{ padding: '14px 0', borderBottom: `1px solid ${T.line}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
+            <span style={{ fontSize: 14.5, fontWeight: 500 }}>Scare level</span>
+            <span style={{ fontSize: 12, color: scareNow === 'scary' ? T.alert : T.ok }}>
+              {scareNow === 'scary' ? 'Scary right now' : 'Little kids right now'}
+            </span>
+          </div>
+          <div style={{ fontSize: 11.5, color: T.dim, margin: '2px 0 10px' }}>
+            Little kids get an owl, a howl or a witch's laugh at the door; scary gets thunder and lightning.
+            Auto switches at the time set in Setup.
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {['Auto', 'Little kids', 'Scary'].map((o) => (
+              <Pill key={o} active={scareLevel === o}
+                onClick={() => void hass.callService('input_select', 'select_option', { option: o },
+                  { entity_id: 'input_select.halloween_scare_level' })}>{o}</Pill>
+            ))}
+          </div>
         </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, paddingTop: 16 }}>
+          <FirePill hass={hass} script="script.halloween_out_of_candy" label="🍬 Out of candy" tone="alert" big
+            confirm="Stops the effects, turns off Trick-or-treat, the foyer and the front cans. Switch the porch light off by hand." />
+          <FirePill hass={hass} script="script.halloween_lightning" label="⚡ Lightning" />
+        </div>
+      </Glass>
+
+      <Glass>
+        <PanelHead label="Scoreboard" />
+        <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'repeat(2, minmax(0,1fr))', marginBottom: 16 }}>
+          <BigStat value={visitors} label="door openings during trick-or-treat" />
+          <BigStat value={spells} label="wand spells cast" />
+        </div>
+        <button type="button" className="est-tap" onClick={() => go('wand')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '12px 14px', borderRadius: 12,
+            border: `1px solid ${T.line}`, background: 'rgba(255,255,255,0.04)', color: T.text, font: 'inherit',
+            cursor: 'pointer', textAlign: 'left',
+          }}>
+          <span style={{
+            width: 10, height: 10, borderRadius: 999, flex: 'none',
+            background: cam.online ? T.ok : T.alert, boxShadow: cam.online ? `0 0 8px ${T.ok}` : 'none',
+          }} />
+          <span style={{ flex: 1, fontSize: 13.5 }}>
+            {cam.online ? 'Wand camera watching' : 'Wand camera offline'}
+            <span style={{ display: 'block', fontSize: 11.5, color: T.dim, marginTop: 2 }}>
+              {cam.online ? cam.status : 'The Pi by the door has not checked in. Is it plugged in?'}
+            </span>
+          </span>
+          <span style={{ color: T.gold, fontSize: 12 }}>Wand &rarr;</span>
+        </button>
+        <div style={{ display: 'flex', gap: 14, marginTop: 14 }}>
+          {[['input_number.halloween_visitors', 'Reset door count'], ['input_number.halloween_spells_cast', 'Reset spell count']].map(([e, l]) => (
+            <button key={e} type="button" className="est-tap"
+              onClick={() => void hass.callService('input_number', 'set_value', { value: 0 }, { entity_id: e })}
+              style={{ font: 'inherit', fontSize: 11.5, border: 'none', background: 'transparent', color: T.faint, cursor: 'pointer', padding: 0 }}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </Glass>
+    </div>
+  );
+}
+
+function HalloweenSetup({ hass }: { hass: Hass }) {
+  const speaker = useEntity(hass, 'input_select.halloween_speaker')?.state ?? 'None';
+  return (
+    <Glass>
+      <PanelHead label="Setup" />
+      <div style={{ padding: '4px 0 14px', borderBottom: `1px solid ${T.line}` }}>
+        <div style={{ fontSize: 14.5, fontWeight: 500 }}>Door speaker</div>
         <div style={{ fontSize: 11.5, color: T.dim, margin: '2px 0 10px' }}>
-          Little kids: the door gets an owl, a howl or a witch's laugh, and the sound board hides the
-          scariest buttons. Scary: thunder and lightning. Auto switches at the time below.
+          Where the door scare, thunder and wand spells play. None means lights only. (The sound board
+          has its own picker on the Sounds tab.)
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {['Auto', 'Little kids', 'Scary'].map((o) => (
-            <Pill key={o} active={scareLevel === o}
-              onClick={() => void hass.callService('input_select', 'select_option', { option: o },
-                { entity_id: 'input_select.halloween_scare_level' })}>{o}</Pill>
+          {HALLOWEEN_SPEAKERS.map((s) => (
+            <Pill key={s} active={speaker === s}
+              onClick={() => void hass.callService('input_select', 'select_option', { option: s },
+                { entity_id: 'input_select.halloween_speaker' })}>{s}</Pill>
           ))}
         </div>
       </div>
       <SettingTime hass={hass} entity="input_datetime.halloween_scary_after"
-        label="Scary after" hint="When Auto turns from little kids to scary." />
-      <div style={{ padding: '14px 0', borderBottom: `1px solid ${T.line}` }}>
-        <div style={{ fontSize: 14.5, fontWeight: 500 }}>Door thunder plays on</div>
-        <div style={{ fontSize: 11.5, color: T.dim, margin: '2px 0 10px' }}>
-          Only matters if a Sonos is carried to the entry for the night. None means lights only.
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {HALLOWEEN_SPEAKERS.map((s) => (
-            <Pill key={s} active={speaker === s} onClick={() => pick(s)}>{s}</Pill>
-          ))}
-        </div>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '14px 0', borderBottom: `1px solid ${T.line}` }}>
-        <span style={{ fontSize: 30, fontWeight: 250, fontVariantNumeric: 'tabular-nums' }}>{visitors}</span>
-        <span style={{ fontSize: 12.5, color: T.dim, flex: 1 }}>
-          door openings during trick-or-treat - roughly, how many groups came. Resets at 5 pm on the 31st.
-        </span>
-        <button type="button" className="est-tap"
-          onClick={() => void hass.callService('input_number', 'set_value', { value: 0 }, { entity_id: 'input_number.halloween_visitors' })}
-          style={{ font: 'inherit', fontSize: 11.5, border: 'none', background: 'transparent', color: T.faint, cursor: 'pointer' }}>
-          Reset
-        </button>
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, paddingTop: 14 }}>
-        <FirePill hass={hass} script="script.halloween_lightning" label="Test lightning" />
-        <FirePill hass={hass} script="script.halloween_out_of_candy" label="Out of candy" tone="alert"
-          confirm="Turns off Trick-or-treat and the foyer light. Switch the porch light off by hand." />
-      </div>
-    </AlertBlock>
+        label="Scary after" hint="When Auto scare level turns from little kids to scary." />
+      <SettingBooleanToggle hass={hass} entity="input_boolean.halloween_ambient_lightning"
+        label="Ambient lightning"
+        hint="A silent flicker every five minutes or so while Trick-or-treat is on, for the street." />
+      <SettingBooleanToggle hass={hass} entity="input_boolean.halloween_sound_lights"
+        label="Lights react to sounds"
+        hint="Each sound fires its light cue on the front cans: zombies green and red, scream red, and so on." />
+      <SettingBooleanToggle hass={hass} entity="input_boolean.halloween_wands"
+        label="Wand spells"
+        hint="Off and the door ignores every wand, however hard it is waved." />
+    </Glass>
   );
 }
 
@@ -2041,7 +2115,7 @@ function SoundBoard({ hass, span }: { hass: Hass; span: number }) {
   const all = useHalloweenSounds(hass);
   const little = useEntity(hass, 'sensor.halloween_scare_now')?.state !== 'scary';
   const [showAll, setShowAll] = useState(false);
-  const sounds = all?.filter((x) => !x.key.startsWith('bg_') && !x.key.startsWith('spell_') && (!little || showAll || !SCARY_SOUNDS.has(x.key))) ?? null;
+  const sounds = all?.filter((x) => !x.key.startsWith('bg_') && !x.key.startsWith('spell_') && !x.key.startsWith('lumos_') && (!little || showAll || !SCARY_SOUNDS.has(x.key))) ?? null;
   const hiddenCount = little && !showAll ? (all ?? []).filter((x) => SCARY_SOUNDS.has(x.key)).length : 0;
   const tracks = all?.filter((x) => x.key.startsWith('bg_')) ?? [];
   const [target, setTarget] = useState<string>(() => {
@@ -2287,10 +2361,6 @@ function LightShow({ hass }: { hass: Hass }) {
         </span>
       </div>
 
-      <SettingBooleanToggle hass={hass} entity="input_boolean.halloween_sound_lights"
-        label="Lights react to sounds"
-        hint="Zombies flash green and red, the scream strobes red, thunder is lightning, the slam blacks out." />
-      <div style={{ height: 14 }} />
       <span style={{ ...LABEL, display: 'block', marginBottom: 8 }}>Colour for Pulse and Strobe</span>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {colors.map((c) => (
@@ -2332,26 +2402,32 @@ const SPELLS: ReadonlyArray<{ id: string; name: string; gesture: string; emoji: 
 function WandCard({ hass }: { hass: Hass }) {
   const last = useEntity(hass, 'input_text.halloween_last_spell')?.state;
   const cast = Math.round(Number(useEntity(hass, 'input_number.halloween_spells_cast')?.state ?? 0)) || 0;
+  const cam = useWandCamera(hass);
   return (
-    <AlertBlock label="🪄 Wand spells"
-      note="A Pi camera by the door watches for the glowing wand tip and turns the shape into a spell. Until it arrives, the buttons below cast them by hand.">
-      <SettingBooleanToggle hass={hass} entity="input_boolean.halloween_wands"
-        label="Wands active" hint="Off and the door ignores every wand, however hard it is waved." />
+    <AlertBlock label="🪄 Wand"
+      note="The camera by the door watches for the glowing wand tip and turns the shape into a spell. Each button below casts that spell exactly as the wand would - sound on the door speaker, effect on the front cans. A new spell cuts the last one short.">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 0 14px', borderBottom: `1px solid ${T.line}` }}>
+        <span style={{
+          width: 10, height: 10, borderRadius: 999, flex: 'none',
+          background: cam.online ? T.ok : T.alert, boxShadow: cam.online ? `0 0 8px ${T.ok}` : 'none',
+        }} />
+        <span style={{ flex: 1, fontSize: 13.5 }}>
+          {cam.online ? 'Camera watching' : 'Camera offline'}
+          <span style={{ display: 'block', fontSize: 11.5, color: T.dim, marginTop: 2 }}>
+            {cam.online ? cam.status : 'No check-in from the wand Pi in the last few minutes.'}
+          </span>
+        </span>
+      </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '14px 0', borderBottom: `1px solid ${T.line}` }}>
         <span style={{ fontSize: 30, fontWeight: 250, fontVariantNumeric: 'tabular-nums' }}>{cast}</span>
         <span style={{ fontSize: 12.5, color: T.dim, flex: 1 }}>
           {`spells cast${last && last !== 'unknown' ? ` · last: ${last}` : ''}`}
         </span>
-        <button type="button" className="est-tap"
-          onClick={() => void hass.callService('input_number', 'set_value', { value: 0 }, { entity_id: 'input_number.halloween_spells_cast' })}
-          style={{ font: 'inherit', fontSize: 11.5, border: 'none', background: 'transparent', color: T.faint, cursor: 'pointer' }}>
-          Reset
-        </button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(104px, 1fr))', gap: 8, paddingTop: 14 }}>
         {SPELLS.map((sp) => (
           <button key={sp.id} type="button" className="est-lift est-tap"
-            onClick={() => void hass.callService('script', 'halloween_spell', { spell: sp.id })}
+            onClick={() => void hass.callService('script', 'turn_on', { variables: { spell: sp.id } }, { entity_id: 'script.halloween_spell' })}
             style={{
               borderRadius: 14, padding: '12px 6px', cursor: 'pointer', display: 'grid', placeItems: 'center', gap: 4,
               font: 'inherit', color: T.text, border: `1px solid ${T.line}`, background: 'rgba(255,255,255,0.04)',
@@ -2367,16 +2443,35 @@ function WandCard({ hass }: { hass: Hass }) {
 }
 
 function HalloweenPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
-  const cols = narrow ? 1 : 3;
+  const [tab, setTab] = useState<HalloweenTab>(() => {
+    const s = sectionFromHash();
+    return HALLOWEEN_TABS.some((t) => t.id === s) ? (s as HalloweenTab) : 'tonight';
+  });
+  // replaceState, as on the Sky tabs: must not fire `hashchange`.
+  const pick = (id: HalloweenTab) => {
+    setTab(id);
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#halloween/${id}`);
+  };
+  const cols = narrow ? 1 : 2;
   return (
-    <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
-      <SoundBoard hass={hass} span={narrow ? 1 : 2} />
-      <div style={{ display: 'grid', gap: 18, alignContent: 'start' }}>
-        <LightShow hass={hass} />
-      </div>
-      <HalloweenCard hass={hass} span={narrow ? 1 : 2} />
-      <FrontCans hass={hass} />
-      <WandCard hass={hass} />
+    <div style={{ display: 'grid', gap: 18 }}>
+      <Glass style={{ padding: 10 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} role="tablist" aria-label="Halloween sections">
+          {HALLOWEEN_TABS.map((t) => (
+            <Pill key={t.id} active={tab === t.id} onClick={() => pick(t.id)}>{t.label}</Pill>
+          ))}
+        </div>
+      </Glass>
+      {tab === 'tonight' && <TonightPanel hass={hass} narrow={narrow} go={pick} />}
+      {tab === 'sounds' && <SoundBoard hass={hass} span={1} />}
+      {tab === 'lights' && (
+        <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+          <LightShow hass={hass} />
+          <FrontCans hass={hass} />
+        </div>
+      )}
+      {tab === 'wand' && <WandCard hass={hass} />}
+      {tab === 'setup' && <HalloweenSetup hass={hass} />}
     </div>
   );
 }
