@@ -2278,7 +2278,7 @@ function SoundBoard({ hass, span }: { hass: Hass; span: number }) {
                 transition: 'background .2s',
               }}
             >
-              <span style={{ fontSize: 30, lineHeight: 1 }}>{SOUND_EMOJI[s.key] ?? '🔊'}</span>
+              <span style={{ fontSize: 30, lineHeight: 1 }}>{s.key.startsWith('try_') ? '🧪' : SOUND_EMOJI[s.key] ?? '🔊'}</span>
               <span>{s.label}</span>
             </button>
           ))}
@@ -2399,6 +2399,35 @@ const SPELLS: ReadonlyArray<{ id: string; name: string; gesture: string; emoji: 
   { id: 'leviosa', name: 'Leviosa', gesture: 'swish and flick', emoji: '🪶' },
 ];
 
+/* The two Halloween volumes, wherever a tab plays sound. Effects covers the
+   sound board, door scare, thunder and every wand spell - one level, so they
+   always match. Music is the background track only. */
+function HalloweenVolume({ hass }: { hass: Hass }) {
+  const [vol, setVol] = useHaPercent(hass, 'input_number.halloween_volume', 50);
+  const [bg, setBg] = useHaPercent(hass, 'input_number.halloween_bg_volume', 25);
+  const row = (label: string, value: number, set: (v: number) => void, hint: string) => (
+    <div style={{ padding: '10px 0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ ...LABEL, width: 70 }}>{label}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <GoldSlider value={value} ariaLabel={`${label} volume`} onChange={(v) => { set(v); }} />
+        </div>
+        <span style={{ fontSize: 13, color: T.dim, width: 38, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+          {`${Math.round(value)}%`}
+        </span>
+      </div>
+      <div style={{ fontSize: 11, color: T.faint, marginTop: 4, paddingLeft: 82 }}>{hint}</div>
+    </div>
+  );
+  return (
+    <Glass>
+      <PanelHead label="🔈 Volume" />
+      {row('Effects', vol, setVol, 'Every sound effect, the door scare and the wand spells.')}
+      {row('Music', bg, setBg, 'The background track on a Sonos.')}
+    </Glass>
+  );
+}
+
 function WandCard({ hass }: { hass: Hass }) {
   const last = useEntity(hass, 'input_text.halloween_last_spell')?.state;
   const cast = Math.round(Number(useEntity(hass, 'input_number.halloween_spells_cast')?.state ?? 0)) || 0;
@@ -2462,7 +2491,12 @@ function HalloweenPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
           ))}
         </div>
       </Glass>
-      {tab === 'tonight' && <TonightPanel hass={hass} narrow={narrow} go={pick} />}
+      {tab === 'tonight' && (
+        <>
+          <TonightPanel hass={hass} narrow={narrow} go={pick} />
+          <HalloweenVolume hass={hass} />
+        </>
+      )}
       {tab === 'sounds' && <SoundBoard hass={hass} span={1} />}
       {tab === 'lights' && (
         <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
@@ -2470,7 +2504,12 @@ function HalloweenPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
           <FrontCans hass={hass} />
         </div>
       )}
-      {tab === 'wand' && <WandCard hass={hass} />}
+      {tab === 'wand' && (
+        <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+          <WandCard hass={hass} />
+          <HalloweenVolume hass={hass} />
+        </div>
+      )}
       {tab === 'setup' && <HalloweenSetup hass={hass} />}
     </div>
   );
