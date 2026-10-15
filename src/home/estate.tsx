@@ -2033,7 +2033,7 @@ const EFFECT_SWATCH: Record<string, string> = {
   Orange: '#ff6a00', Purple: '#8200ff', Green: '#28ff1e', Red: '#ff1a1a', White: '#f4f1ea',
 };
 /* Hidden from the board while the scare level says little kids. */
-const SCARY_SOUNDS = new Set(['thunder', 'scream', 'zombie_groan', 'door_slam', 'chains', 'evil_laugh_2', 'heartbeat']);
+const SCARY_SOUNDS = new Set(['thunder', 'scream', 'zombie_groan', 'door_slam', 'chains', 'evil_laugh_2', 'heartbeat', 'spell_avada_kedavra']);
 
 const SOUND_SPEAKERS: ReadonlyArray<{ id: string; label: string; note?: string }> = [
   { id: 'here', label: 'This device' },
@@ -2065,7 +2065,11 @@ function useHalloweenSounds(hass: Hass): Sound[] | null {
           const label = key.replace(/[_-]+/g, ' ').replace(/^\w/, (x) => x.toUpperCase());
           return { id: c.media_content_id, key, label, real: m[1].toLowerCase() === 'spooky' };
         })
-        .filter((s): s is Sound & { real: boolean } => s !== null);
+        .filter((s): s is Sound & { real: boolean } => s !== null)
+        .filter((s) => !s.key.startsWith('spell_') || /\.mp3$/i.test(s.id))
+        .map((s) => (s.key.startsWith('spell_')
+          ? { ...s, label: s.key.slice(6).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) }
+          : s));
       const realKeys = new Set(found.filter((x) => x.real).map((x) => x.key));
       const shown = found
         .filter((x) => x.real || (!realKeys.has(x.key) && !realKeys.has(DRAFT_REPLACED_BY[x.key] ?? '')))
@@ -2115,7 +2119,7 @@ function SoundBoard({ hass, span }: { hass: Hass; span: number }) {
   const all = useHalloweenSounds(hass);
   const little = useEntity(hass, 'sensor.halloween_scare_now')?.state !== 'scary';
   const [showAll, setShowAll] = useState(false);
-  const sounds = all?.filter((x) => !x.key.startsWith('bg_') && !x.key.startsWith('spell_') && !x.key.startsWith('lumos_') && (!little || showAll || !SCARY_SOUNDS.has(x.key))) ?? null;
+  const sounds = all?.filter((x) => !x.key.startsWith('bg_') && !x.key.startsWith('lumos_') && (!little || showAll || !SCARY_SOUNDS.has(x.key))) ?? null;
   const hiddenCount = little && !showAll ? (all ?? []).filter((x) => SCARY_SOUNDS.has(x.key)).length : 0;
   const tracks = all?.filter((x) => x.key.startsWith('bg_')) ?? [];
   const [target, setTarget] = useState<string>(() => {
@@ -2278,7 +2282,9 @@ function SoundBoard({ hass, span }: { hass: Hass; span: number }) {
                 transition: 'background .2s',
               }}
             >
-              <span style={{ fontSize: 30, lineHeight: 1 }}>{s.key.startsWith('try_') ? '🧪' : SOUND_EMOJI[s.key] ?? '🔊'}</span>
+              <span style={{ fontSize: 30, lineHeight: 1 }}>
+                {s.key.startsWith('try_') ? '🧪' : s.key.startsWith('spell_') ? '🪄' : SOUND_EMOJI[s.key] ?? '🔊'}
+              </span>
               <span>{s.label}</span>
             </button>
           ))}
@@ -2397,6 +2403,9 @@ const SPELLS: ReadonlyArray<{ id: string; name: string; gesture: string; emoji: 
   { id: 'incendio', name: 'Incendio', gesture: 'flick up', emoji: '🔥' },
   { id: 'colovaria', name: 'Colovaria', gesture: 'Z swish', emoji: '🌈' },
   { id: 'leviosa', name: 'Leviosa', gesture: 'swish and flick', emoji: '🪶' },
+  { id: 'arania_exumai', name: 'Arania Exumai', gesture: 'V', emoji: '🕷️' },
+  { id: 'avada_kedavra', name: 'Avada Kedavra', gesture: 'lightning bolt', emoji: '💚' },
+  { id: 'immobilus', name: 'Immobilus', gesture: 'swipe right', emoji: '🧊' },
 ];
 
 /* The two Halloween volumes, wherever a tab plays sound. Effects covers the
