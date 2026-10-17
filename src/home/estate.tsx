@@ -2459,6 +2459,11 @@ function WandCard({ hass }: { hass: Hass }) {
         <span style={{ fontSize: 12.5, color: T.dim, flex: 1 }}>
           {`spells cast${last && last !== 'unknown' ? ` · last: ${last}` : ''}`}
         </span>
+        <button type="button" className="est-tap"
+          onClick={() => void hass.callService('input_number', 'set_value', { value: 0 }, { entity_id: 'input_number.halloween_spells_cast' })}
+          style={{ font: 'inherit', fontSize: 11.5, border: `1px solid ${T.line}`, borderRadius: 999, padding: '4px 11px', background: 'transparent', color: T.dim, cursor: 'pointer' }}>
+          Reset
+        </button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(104px, 1fr))', gap: 8, paddingTop: 14 }}>
         {SPELLS.map((sp) => (
