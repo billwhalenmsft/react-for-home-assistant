@@ -2399,11 +2399,11 @@ function LightShow({ hass }: { hass: Hass }) {
  */
 const SPELLS: ReadonlyArray<{ id: string; name: string; gesture: string; emoji: string }> = [
   { id: 'lumos', name: 'Lumos', gesture: 'circle', emoji: '✨' },
-  { id: 'incendio', name: 'Incendio', gesture: 'flick up', emoji: '🔥' },
-  { id: 'immobilus', name: 'Immobilus', gesture: 'flick down', emoji: '🧊' },
-  { id: 'colovaria', name: 'Colovaria', gesture: 'Z swish', emoji: '🌈' },
-  { id: 'arania_exumai', name: 'Arania Exumai', gesture: 'swish and flick', emoji: '🕷️' },
-  { id: 'avada_kedavra', name: 'Avada Kedavra', gesture: 'lightning bolt', emoji: '💚' },
+  { id: 'incendio', name: 'Incendio', gesture: 'slide up', emoji: '🔥' },
+  { id: 'immobilus', name: 'Immobilus', gesture: 'slide down', emoji: '🧊' },
+  { id: 'colovaria', name: 'Colovaria', gesture: 'swipe ↔', emoji: '🌈' },
+  { id: 'arania_exumai', name: 'Arania Exumai', gesture: 'slash ↘', emoji: '🕷️' },
+  { id: 'avada_kedavra', name: 'Avada Kedavra', gesture: 'slash ↙', emoji: '💚' },
 ];
 
 /* The two Halloween volumes, wherever a tab plays sound. Effects covers the
