@@ -458,7 +458,11 @@ export function EntityControl({
           <Slider
             value={vol}
             ariaLabel={`${name} volume`}
-            onCommit={(v) => call('media_player', 'volume_set', { volume_level: v / 100 })}
+            // Same guard as the square: a tap at the far end of the track
+            // raises it 15 points, not straight to full.
+            onCommit={(v) => call('media_player', 'volume_set', {
+              volume_level: Math.min(v, vol + 15) / 100,
+            })}
           />
         ) : null}
       </div>
