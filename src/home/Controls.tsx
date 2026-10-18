@@ -177,7 +177,7 @@ const PX_PER_UNIT = 1.6;  // drag distance for one unit of value
 
 export function SquareControl({
   label, sub, value, on, slideable, min = 0, max = 100, unit = '%',
-  onToggle, onCommit, ariaLabel,
+  onToggle, onCommit, ariaLabel, tint,
 }: {
   label: string;
   sub?: string;
@@ -192,6 +192,8 @@ export function SquareControl({
   onToggle?: () => void;
   onCommit: (v: number) => void;
   ariaLabel: string;
+  /** a colour bulb's live colour, so the fill shows what the lamp is doing */
+  tint?: string | null;
 }) {
   const [draft, setDraft] = useState<number | null>(null);
   const drag = useRef<{ y: number; from: number; moved: boolean } | null>(null);
@@ -255,7 +257,14 @@ export function SquareControl({
         touchAction: slideable ? 'none' : 'manipulation',
       }}
     >
-      <span aria-hidden="true" style={{ ...Q.fill, height: `${fill}%` }} />
+      <span
+        aria-hidden="true"
+        style={{
+          ...Q.fill,
+          height: `${fill}%`,
+          ...(tint ? { background: `linear-gradient(to top, ${tint}, color-mix(in srgb, ${tint} 35%, transparent))`, opacity: 0.6 } : null),
+        }}
+      />
       <span style={Q.body}>
         <span style={Q.value}>
           {on ? (shown !== null ? `${shown}${unit}` : 'On') : 'Off'}
@@ -555,9 +564,11 @@ function square({ id, s, domain, on, name, call }: {
 }) {
   if (domain === 'light') {
     const dim = isDimmable(id, s);
+    const rgb = attr(s, 'rgb_color');
     return (
       <SquareControl
         label={name}
+        tint={on && Array.isArray(rgb) ? `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})` : null}
         value={dim ? brightnessPct(s) : null}
         on={on}
         slideable={dim}

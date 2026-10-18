@@ -15,6 +15,7 @@ import type { Hass, HassEntity } from '../ha/types';
 import { Floorplan } from './floorplan';
 import { RoomsGrid } from './RoomsGrid';
 import { useControlStyle } from './Controls';
+import { ColorWheel, KELVIN_PRESETS } from './ColorLights';
 import { THEME_CSS } from './theme';
 import { HousePulse, PulseChart, ForecastStrip } from './pulse';
 import { IssMap, type IssState } from './skymap';
@@ -2560,14 +2561,6 @@ const attrNum = (e: HassEntity | undefined, key: string, fallback: number): numb
   return Number.isFinite(v) ? v : fallback;
 };
 
-const KELVIN_PRESETS: ReadonlyArray<{ k: number; label: string; css: string }> = [
-  { k: 2200, label: 'Candle',   css: '#ffb56b' },
-  { k: 2700, label: 'Warm',     css: '#ffc998' },
-  { k: 4000, label: 'Neutral',  css: '#ffe4cd' },
-  { k: 5500, label: 'Daylight', css: '#fff4ec' },
-  { k: 6500, label: 'Cool',     css: '#eaf1ff' },
-];
-
 const HUE_COLORS: ReadonlyArray<{ label: string; hs: [number, number] }> = [
   { label: 'Blossom', hs: [335, 44] },
   { label: 'Amber',   hs: [30, 66] },
@@ -2808,84 +2801,6 @@ const rgbCss = (e: HassEntity | undefined): string | null => {
   const c = attr(e, 'rgb_color') as number[] | undefined;
   return e?.state === 'on' && c ? `rgb(${c[0]}, ${c[1]}, ${c[2]})` : null;
 };
-
-/*
- * Drag-to-pick colour wheel. Hue runs round the rim, saturation from white at
- * the centre to full colour at the edge - the same model the bulbs take, so
- * what the thumb sits on is what gets sent.
- *
- * The thumb follows the finger locally; the light gets a command at most every
- * `every` ms while dragging and once more on release, so a sweep across the
- * wheel is a handful of Zigbee frames rather than a flood the mesh drops.
- */
-function ColorWheel({ hs, onPick, size = 210, every = 300, disabled }: {
-  hs: [number, number] | null; onPick: (hs: [number, number]) => void;
-  size?: number; every?: number; disabled?: boolean;
-}) {
-  const [draft, setDraft] = useState<[number, number] | null>(null);
-  const dragging = useRef(false);
-  const lastSent = useRef(0);
-  const pending = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(pending.current), []);
-  // Drop the local draft once the light reports something close to it.
-  useEffect(() => {
-    if (!draft || dragging.current || !hs) return undefined;
-    const t = window.setTimeout(() => setDraft(null), 3000);
-    return () => window.clearTimeout(t);
-  }, [hs, draft]);
-
-  const shown = draft ?? hs;
-  const at = (ev: React.PointerEvent<HTMLDivElement>): [number, number] => {
-    const r = ev.currentTarget.getBoundingClientRect();
-    const dx = ev.clientX - (r.left + r.width / 2);
-    const dy = ev.clientY - (r.top + r.height / 2);
-    const hue = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
-    const sat = Math.min(1, Math.hypot(dx, dy) / (r.width / 2)) * 100;
-    return [Math.round(hue), Math.round(sat)];
-  };
-  const push = (v: [number, number], final: boolean) => {
-    setDraft(v);
-    window.clearTimeout(pending.current);
-    const wait = every - (Date.now() - lastSent.current);
-    if (final || wait <= 0) { lastSent.current = Date.now(); onPick(v); return; }
-    pending.current = window.setTimeout(() => { lastSent.current = Date.now(); onPick(v); }, wait);
-  };
-
-  const R = size / 2;
-  const thumb = shown
-    ? { x: R + Math.cos(shown[0] * Math.PI / 180) * R * (shown[1] / 100), y: R + Math.sin(shown[0] * Math.PI / 180) * R * (shown[1] / 100) }
-    : null;
-
-  return (
-    <div
-      role="slider" aria-label="Colour wheel" aria-valuetext={shown ? `hue ${shown[0]}, saturation ${shown[1]}%` : 'no colour'}
-      onPointerDown={(ev) => {
-        if (disabled) return;
-        dragging.current = true;
-        ev.currentTarget.setPointerCapture(ev.pointerId);
-        push(at(ev), false);
-      }}
-      onPointerMove={(ev) => { if (dragging.current) push(at(ev), false); }}
-      onPointerUp={(ev) => { if (!dragging.current) return; dragging.current = false; push(at(ev), true); }}
-      onPointerCancel={() => { dragging.current = false; }}
-      style={{
-        position: 'relative', width: size, height: size, borderRadius: '50%', margin: '0 auto',
-        touchAction: 'none', cursor: disabled ? 'default' : 'crosshair', opacity: disabled ? 0.4 : 1,
-        background: `radial-gradient(circle closest-side, #fff, rgba(255,255,255,0)),
-          conic-gradient(from 90deg, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)`,
-        boxShadow: '0 6px 30px rgba(0,0,0,0.35)',
-      }}
-    >
-      {thumb && (
-        <span style={{
-          position: 'absolute', left: thumb.x - 13, top: thumb.y - 13, width: 26, height: 26, borderRadius: '50%',
-          border: '3px solid #fff', boxShadow: '0 0 0 1px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.5)',
-          background: `hsl(${shown![0]}, ${shown![1]}%, ${100 - shown![1] / 2}%)`, pointerEvents: 'none',
-        }} />
-      )}
-    </div>
-  );
-}
 
 function FrontCans({ hass }: { hass: Hass }) {
   const ids = useMemo(() => [FRONT_CANS, ...FRONT_CAN_IDS, 'input_boolean.halloween_mode'], []);

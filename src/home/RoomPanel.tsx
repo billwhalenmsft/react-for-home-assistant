@@ -6,6 +6,7 @@ import { HOUSE } from '../house';
 import { GarageControl } from './GarageControl';
 import { ACTIONABLE, EntityControl, isOn, nameOf, rendersAsSquare, useControlStyle } from './Controls';
 import { DiffuserBlock, diffusersFor } from './Scent';
+import { ColorLightBlock, isColorLight } from './ColorLights';
 
 /**
  * One room, everything in it, all at once.
@@ -54,6 +55,7 @@ export function RoomPanel({
   const { controls, readouts } = useMemo(() => split(ids), [ids]);
   const [ctrl] = useControlStyle(hass);
   const isGarage = !!GARAGE[room];
+  const colorIds = controls.filter((id) => isColorLight(id, states[id]));
 
   return (
     <div
@@ -95,6 +97,10 @@ export function RoomPanel({
           ) : (
             <div style={S.empty}>Nothing here to operate — only readings.</div>
           )}
+
+          {colorIds.length ? (
+            <ColorLightBlock hass={hass} ids={colorIds} states={states} room={room} />
+          ) : null}
 
           {spec?.scentDiffusers?.length ? (
             <div style={S.scent}>
