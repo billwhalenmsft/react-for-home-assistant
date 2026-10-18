@@ -177,7 +177,7 @@ const PX_PER_UNIT = 1.6;  // drag distance for one unit of value
 
 export function SquareControl({
   label, sub, value, on, slideable, min = 0, max = 100, unit = '%',
-  onToggle, onCommit, ariaLabel, tint,
+  onToggle, onCommit, ariaLabel, tint, pxPerUnit = PX_PER_UNIT, maxStep,
 }: {
   label: string;
   sub?: string;
@@ -194,6 +194,10 @@ export function SquareControl({
   ariaLabel: string;
   /** a colour bulb's live colour, so the fill shows what the lamp is doing */
   tint?: string | null;
+  /** drag distance per unit; larger is calmer */
+  pxPerUnit?: number;
+  /** most one gesture may move the value, either way */
+  maxStep?: number;
 }) {
   const [draft, setDraft] = useState<number | null>(null);
   const drag = useRef<{ y: number; from: number; moved: boolean } | null>(null);
@@ -215,7 +219,9 @@ export function SquareControl({
     const dy = d.y - e.clientY;                    // up is positive
     if (!d.moved && Math.abs(dy) < DEAD_ZONE) return;
     d.moved = true;
-    setDraft(clamp(d.from + dy / PX_PER_UNIT));
+    const delta = dy / pxPerUnit;
+    const capped = maxStep === undefined ? delta : Math.max(-maxStep, Math.min(maxStep, delta));
+    setDraft(clamp(d.from + capped));
   };
 
   const up = () => {
@@ -622,6 +628,11 @@ function square({ id, s, domain, on, name, call }: {
         value={vol}
         on={playing}
         slideable={vol !== null}
+        // A swipe that lands on the TV instead of the lamp beside it once took
+        // the Frame from 16% to 100% (2026-10-17). Volume moves slowly and at
+        // most 15 points per gesture, so a stray swipe is a nudge, not a blast.
+        pxPerUnit={6}
+        maxStep={15}
         ariaLabel={`${playing ? 'Pause' : 'Play'} ${name}, slide for volume`}
         onToggle={() => call('media_player', 'media_play_pause')}
         onCommit={(v) => call('media_player', 'volume_set', { volume_level: v / 100 })}
