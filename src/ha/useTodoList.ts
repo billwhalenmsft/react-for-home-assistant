@@ -7,6 +7,8 @@ export interface TodoItem {
   summary: string;
   status: 'needs_action' | 'completed';
   description?: string;
+  /** YYYY-MM-DD (or a full datetime) when the list supports due dates. */
+  due?: string;
 }
 
 interface GetItemsResponse {

@@ -5154,7 +5154,7 @@ function PeoplePage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
   );
 }
 
-type RowTone = 'go' | 'soon' | 'no';
+type RowTone = 'go' | 'soon' | 'no' | 'late';
 
 interface ListPanelProps {
   hass: Hass;
@@ -5223,7 +5223,8 @@ function ListPanel({
     setDraft('');
   };
 
-  const toneColor = (t: RowTone) => (t === 'go' ? T.ok : t === 'soon' ? T.gold : T.faint);
+  const toneColor = (t: RowTone) =>
+    (t === 'go' ? T.ok : t === 'soon' ? T.gold : t === 'late' ? T.alert : T.faint);
 
   return (
     <Glass span={span}>
@@ -5621,6 +5622,133 @@ function GuitarPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
 
 /* ---------------------------------------------------------------- family */
 
+/*
+ * Which machine a queued print is for lives in its title - "Cauldron · H2D" -
+ * so the list stays a plain HA to-do list that the companion app can edit
+ * without breaking anything here. Untagged items are simply unassigned.
+ */
+const QUEUE_TAG = /\s·\s(X1C|H2D)\s*$/;
+const queuePrinter = (summary: string) => QUEUE_TAG.exec(summary)?.[1] ?? null;
+const queueTitle = (summary: string) => summary.replace(QUEUE_TAG, '');
+
+/** Whole days from today to a YYYY-MM-DD due date, in local time. */
+const daysUntil = (due?: string) => {
+  if (!due) return null;
+  const [y, m, d] = due.slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return null;
+  const t = new Date();
+  return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(t.getFullYear(), t.getMonth(), t.getDate())) / 86400000);
+};
+
+const dueNote = (due?: string): { label: string; tone: RowTone } | null => {
+  const n = daysUntil(due);
+  if (n === null || !due) return null;
+  if (n < 0) return { label: n === -1 ? 'Overdue · was due yesterday' : `Overdue · ${-n} days`, tone: 'late' };
+  if (n === 0) return { label: 'Due today', tone: 'go' };
+  if (n === 1) return { label: 'Due tomorrow', tone: 'soon' };
+  const [y, m, d] = due.slice(0, 10).split('-').map(Number);
+  const day = new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  return { label: `Due ${day}`, tone: n <= 3 ? 'soon' : 'no' };
+};
+
+const byDue = (a: TodoItem, b: TodoItem) =>
+  (a.due ?? '9999').localeCompare(b.due ?? '9999') || a.summary.localeCompare(b.summary);
+
+const QUEUE_FILTERS = [
+  { id: 'all', label: 'All' },
+  { id: 'X1C', label: 'X1C' },
+  { id: 'H2D', label: 'H2D' },
+  { id: 'none', label: 'Unassigned' },
+] as const;
+
+/** Bambu reports time left in hours; nobody reads "33.2 h" as well as "33 h 12 m". */
+const hoursText = (h?: number) => {
+  if (h === undefined || !Number.isFinite(h)) return '--';
+  const mins = Math.round(h * 60);
+  if (mins < 60) return `${mins} min`;
+  return `${Math.floor(mins / 60)} h ${mins % 60} m`;
+};
+
+type PrinterNow = { label: string; online: boolean; running: boolean; task?: string; hoursLeft?: number };
+
+/*
+ * What each printer should do next, in one glance. The point is to make an
+ * idle printer impossible to miss: if a machine is free and something is
+ * queued for it, this says so in gold, with the file and settings to load.
+ */
+function NextUp({ hass, printers, span, narrow }: {
+  hass: Hass; printers: PrinterNow[]; span: number; narrow: boolean;
+}) {
+  const { items, loaded } = useTodoList(hass, E.printQueue ?? '');
+  const open = items.filter((i) => i.status !== 'completed');
+  const unassigned = open.filter((i) => !queuePrinter(i.summary)).length;
+
+  return (
+    <Glass span={span}>
+      <PanelHead
+        label="Next up"
+        right={loaded && unassigned ? (
+          <span style={{ fontSize: 11.5, color: T.faint }}>{unassigned} not assigned to a printer</span>
+        ) : undefined}
+      />
+      <div style={{ display: 'grid', gap: 14, gridTemplateColumns: narrow ? '1fr' : 'repeat(2, minmax(0,1fr))' }}>
+        {printers.map((p) => {
+          const mine = open.filter((i) => queuePrinter(i.summary) === p.label).sort(byDue);
+          const next = mine[0];
+          const due = next ? dueNote(next.due) : null;
+          const free = p.online && !p.running;
+          const now = !p.online
+            ? 'Offline - Home Assistant cannot see it'
+            : p.running
+              ? `Printing ${p.task ?? ''} · ${hoursText(p.hoursLeft)} left`.replace('Printing  ·', 'Printing ·')
+              : 'Idle - ready for the next plate';
+          return (
+            <div key={p.label} style={{
+              padding: '14px 16px', borderRadius: 12, minWidth: 0,
+              border: `1px solid ${free && next ? T.gold : T.line}`,
+              background: free && next ? T.glassHi : 'transparent',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span aria-hidden="true" style={{
+                  width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                  background: !p.online ? T.faint : p.running ? T.ok : T.gold,
+                }} />
+                <span style={{ fontSize: 15, fontWeight: 600 }}>{p.label}</span>
+                <span style={{ fontSize: 12, color: T.dim, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {now}
+                </span>
+              </div>
+              {!loaded ? (
+                <div style={{ fontSize: 13, color: T.dim, marginTop: 10 }}>Loading…</div>
+              ) : next ? (
+                <>
+                  <div style={{ fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase', color: T.gold, marginTop: 12 }}>
+                    {free ? 'Start this now' : 'After this one'}
+                  </div>
+                  <div style={{ fontSize: 20, fontWeight: 300, marginTop: 3 }}>{queueTitle(next.summary)}</div>
+                  {due && (
+                    <div style={{ fontSize: 12, marginTop: 2, color: due.tone === 'late' ? T.alert : due.tone === 'go' ? T.ok : T.gold }}>
+                      {due.label}
+                    </div>
+                  )}
+                  {next.description && (
+                    <div style={{ fontSize: 12.5, color: T.dim, marginTop: 6, lineHeight: 1.45 }}>{next.description}</div>
+                  )}
+                  <div style={{ fontSize: 12, color: T.faint, marginTop: 8 }}>
+                    {mine.length > 1 ? `Then ${mine.slice(1, 3).map((i) => queueTitle(i.summary)).join(', ')}${mine.length > 3 ? ` +${mine.length - 3} more` : ''}` : 'Nothing else queued for it.'}
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontSize: 13, color: T.dim, marginTop: 10 }}>Nothing queued for the {p.label}.</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Glass>
+  );
+}
+
 function PrintQueue({ hass, span }: { hass: Hass; span: number }) {
   return (
     <ListPanel
@@ -5629,7 +5757,13 @@ function PrintQueue({ hass, span }: { hass: Hass; span: number }) {
       label="Print Queue"
       span={span}
       doneVerb="printed"
-      addPlaceholder="Add something to print…"
+      filters={QUEUE_FILTERS}
+      match={(item, id) => id === 'all' || (id === 'none' ? !queuePrinter(item.summary) : queuePrinter(item.summary) === id)}
+      sort={(a, b) => (a.status === b.status ? byDue(a, b) : a.status === 'completed' ? 1 : -1)}
+      display={queueTitle}
+      subtitle={(s) => queuePrinter(s) ?? undefined}
+      annotate={(item) => dueNote(item.due)}
+      addPlaceholder="Add something to print… (end with · X1C or · H2D)"
       /*
        * There is no "reprint this" button, and there cannot be one yet.
        *
@@ -5645,10 +5779,10 @@ function PrintQueue({ hass, span }: { hass: Hass; span: number }) {
        */
       rowExtra={(it) => (
         <>
-          <TabLink href={`https://makerworld.com/en/search/models?keyword=${encodeURIComponent(it.summary)}`}>
+          <TabLink href={`https://makerworld.com/en/search/models?keyword=${encodeURIComponent(queueTitle(it.summary))}`}>
             MakerWorld
           </TabLink>
-          <TabLink href={`https://www.printables.com/search/models?q=${encodeURIComponent(it.summary)}`}>
+          <TabLink href={`https://www.printables.com/search/models?q=${encodeURIComponent(queueTitle(it.summary))}`}>
             Printables
           </TabLink>
         </>
@@ -7317,8 +7451,22 @@ function PrintersPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
     return Number.isFinite(n) ? `${Math.round(n)}${suffix}` : `${v}${suffix}`;
   };
 
+  const printersNow: PrinterNow[] = PRINTERS.map((m) => {
+    const left = Number(st(`sensor.${m.p}_remaining_time`));
+    const unit = attr(e[`sensor.${m.p}_remaining_time`], 'unit_of_measurement');
+    const task = st(`sensor.${m.p}_task_name`);
+    return {
+      label: m.label,
+      online: st(`binary_sensor.${m.p}_online`) === 'on',
+      running: st(`sensor.${m.p}_print_status`) === 'running',
+      task: bad(task) ? undefined : task,
+      hoursLeft: Number.isFinite(left) ? (unit === 'min' ? left / 60 : left) : undefined,
+    };
+  });
+
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+      {E.printQueue && <NextUp hass={hass} printers={printersNow} span={cols} narrow={narrow} />}
       {PRINTERS.map((m) => {
         const online = st(`binary_sensor.${m.p}_online`) === 'on';
         const status = st(`sensor.${m.p}_print_status`);
@@ -7411,7 +7559,7 @@ function PrintersPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: '9px 16px', fontSize: 13 }}>
               <Stat label="Stage" value={fmt(`sensor.${m.p}_current_stage`)} />
-              <Stat label="Remaining" value={fmt(`sensor.${m.p}_remaining_time`, ' min')} />
+              <Stat label="Remaining" value={hoursText(printersNow.find((x) => x.label === m.label)?.hoursLeft)} />
               <Stat label="Layer"
                 value={bad(st(`sensor.${m.p}_current_layer`)) ? '--'
                   : `${st(`sensor.${m.p}_current_layer`)} / ${fmt(`sensor.${m.p}_total_layer_count`)}`} />
@@ -7428,6 +7576,8 @@ function PrintersPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
           </Glass>
         );
       })}
+
+      {E.printQueue && <PrintQueue hass={hass} span={cols} />}
 
       <AlertBlock
         span={cols}
@@ -7447,8 +7597,6 @@ function PrintersPage({ hass, narrow }: { hass: Hass; narrow: boolean }) {
           label="Printer reports a fault"
           hint="Bambu's own health warning, after five quiet minutes. It covers everything from a jam to an open lid, so it is the calm one." />
       </AlertBlock>
-
-      {E.printQueue && <PrintQueue hass={hass} span={cols} />}
     </div>
   );
 }
